@@ -21,15 +21,15 @@ endif
 BUILD_CLIENT     = 1
 BUILD_SERVER     = 1
 
-USE_SDL          = 0
+USE_SDL          = 1
 USE_CURL         = 1
 USE_LOCAL_HEADERS= 0
 USE_VULKAN       = 0
 
 USE_RENDERER_DLOPEN = 0
 
-CNAME            = quake3e
-DNAME            = quake3e.ded
+CNAME            = quake3e_urt
+DNAME            = quake3e_urt.ded
 
 RENDERER_PREFIX  = $(CNAME)
 
