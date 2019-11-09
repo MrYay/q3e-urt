@@ -352,6 +352,7 @@ to handle mirrors,
 */
 void RE_RenderScene( const refdef_t *fd ) {
 	viewParms_t		parms;
+	float x, fov_y;
 	int				startTime;
 
 	if ( !tr.registered ) {
@@ -374,8 +375,18 @@ void RE_RenderScene( const refdef_t *fd ) {
 	tr.refdef.y = fd->y;
 	tr.refdef.width = fd->width;
 	tr.refdef.height = fd->height;
-	tr.refdef.fov_x = fd->fov_x;
-	tr.refdef.fov_y = fd->fov_y;
+
+	if( r_overrideview->integer ) {
+		x = tr.refdef.width / tan( r_fov->value / 360 * M_PI );
+		fov_y = atan2( tr.refdef.height, x );
+		fov_y = fov_y * 360 / M_PI;
+
+		tr.refdef.fov_x = r_fov->value;
+		tr.refdef.fov_y = fov_y;
+	} else {
+		tr.refdef.fov_x = fd->fov_x;
+		tr.refdef.fov_y = fd->fov_y;
+	}
 
 	VectorCopy( fd->vieworg, tr.refdef.vieworg );
 	VectorCopy( fd->viewaxis[0], tr.refdef.viewaxis[0] );

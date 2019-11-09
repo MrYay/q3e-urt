@@ -96,6 +96,8 @@ extern cvar_t *r_ext_texture_env_add;
 
 extern cvar_t *r_ext_texture_filter_anisotropic;
 extern cvar_t *r_ext_max_anisotropy;
+extern cvar_t *r_overrideview;
+extern cvar_t *r_fov;
 
 extern	cvar_t	*r_saveFontData;
 
