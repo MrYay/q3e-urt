@@ -11,6 +11,8 @@ layout(set = 0, binding = 0) uniform UBO {
 	// FRAGMENT
 	vec4 lightColor;
 	vec4 fogColor;
+	// linear dynamic light
+	vec4 lightVector;
 };
 
 layout(set = 1, binding = 0) uniform sampler2D texture0;
@@ -47,8 +49,10 @@ void main() {
 	vec3 nV = normalize(V.xyz);	// normalized view vector
 
 	// light intensity
-	float intensFactor = dot(L.xyz, L.xyz) * lightColorRadius.w;
-	vec3 intens = lightColorRadius.rgb * (1.0 - intensFactor);
+	float intensFactor = 1.0 - dot(L.xyz, L.xyz) * lightColorRadius.w;
+	if (intensFactor <= 0.0)
+		discard;
+	vec3 intens = lightColorRadius.rgb * intensFactor;
 
 	// modulate base by inverted fog alpha
 	base.xyz = base.xyz * ( 1.0 - fog.a );
@@ -59,12 +63,8 @@ void main() {
 	// specular reflection term (N.H)
 	float specFactor = abs(dot(N, normalize(nL + nV)));
 
-	// make sure light and eye vectors are on the same plane side
-	if ( diffuse * dot(N, nV) <= 0 )
-		discard;
-
 	//float spec = pow(specFactor, 8.0) * 0.25;
 	vec4 spec = vec4(pow(specFactor, 10.0)*0.25) * base * 0.8;
 
-	out_color = (base * vec4(abs(diffuse)) + vec4(spec)) * vec4(intens, 1.0);
+	out_color = (base * vec4(diffuse) + spec) * vec4(intens, 1.0);
 }
