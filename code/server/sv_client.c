@@ -1855,7 +1855,7 @@ static void SV_SavePos_f( client_t *cl )
 	ps->groundEntityNum = ENTITYNUM_WORLD;
 
 	pm_flags = ps->pm_flags;
-	ps->pm_flags |= ~PMF_DUCKED;
+	ps->pm_flags &= ~PMF_DUCKED;
 
 	VM_Call( gvm, 1, GAME_CLIENT_COMMAND, cl - svs.clients );
 
