@@ -1839,6 +1839,30 @@ void SV_PrintLocations_f( client_t *client ) {
 	}
 }
 
+static void SV_SavePos_f( client_t *cl )
+{
+	playerState_t *ps;
+	vec3_t velocity;
+	int groundEntityNum;
+	int pm_flags;
+
+	ps = SV_GameClientNum( cl - svs.clients );
+
+	VectorCopy(ps->velocity, velocity);
+	VectorClear(ps->velocity);
+
+	groundEntityNum = ps->groundEntityNum;
+	ps->groundEntityNum = ENTITYNUM_WORLD;
+
+	pm_flags = ps->pm_flags;
+	ps->pm_flags |= ~PMF_DUCKED;
+
+	VM_Call( gvm, 1, GAME_CLIENT_COMMAND, cl - svs.clients );
+
+	VectorCopy( velocity, ps->velocity );
+	ps->groundEntityNum = groundEntityNum;
+	ps->pm_flags = pm_flags;
+}
 
 typedef struct {
 	const char *name;
@@ -1855,6 +1879,7 @@ static const ucmd_t ucmds[] = {
 	{"stopdl", SV_StopDownload_f},
 	{"donedl", SV_DoneDownload_f},
 	{"locations", SV_PrintLocations_f},
+	{"save", SV_SavePos_f},
 
 	{NULL, NULL}
 };
