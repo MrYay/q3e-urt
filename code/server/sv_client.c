@@ -1880,6 +1880,7 @@ static const ucmd_t ucmds[] = {
 	{"donedl", SV_DoneDownload_f},
 	{"locations", SV_PrintLocations_f},
 	{"save", SV_SavePos_f},
+	{"savepos", SV_SavePos_f},
 
 	{NULL, NULL}
 };
