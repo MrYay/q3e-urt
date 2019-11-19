@@ -431,6 +431,13 @@ extern	cvar_t	*r_stencilbits;
 extern	cvar_t	*r_depthbits;
 extern	cvar_t	*r_drawBuffer;
 
+#ifdef USE_AUTH
+extern  cvar_t	*cl_auth_engine;
+extern  cvar_t  *cl_auth;
+extern  cvar_t  *authc;
+extern  cvar_t  *authl; // Auth Login
+#endif
+
 //=================================================
 
 //
