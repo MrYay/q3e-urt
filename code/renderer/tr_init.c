@@ -1589,7 +1589,7 @@ static void R_Register( void )
 	r_flares = ri.Cvar_Get( "r_flares", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 
 	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-	r_overrideview = ri.Cvar_Get( "r_overrideview", "1", CVAR_ARCHIVE_ND );
+	r_overrideview = ri.Cvar_Get( "r_overrideview", "0", CVAR_ARCHIVE_ND );
 	r_fov = ri.Cvar_Get( "r_fov", "125", CVAR_ARCHIVE_ND );
 
 	r_ext_supersample = ri.Cvar_Get( "r_ext_supersample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
