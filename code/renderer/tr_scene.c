@@ -376,19 +376,15 @@ void RE_RenderScene( const refdef_t *fd ) {
 	tr.refdef.width = fd->width;
 	tr.refdef.height = fd->height;
 
-	if( r_overrideview->integer ) {
+	if( r_overrideview->integer && fd->fov_x >= 90.0f ) {
 
-		if( fd->fov_x >= 90.0f ) {
-			x = tr.refdef.width / tan( r_fov->value / 360 * M_PI );
-			fov_y = atan2( tr.refdef.height, x );
-			fov_y = fov_y * 360 / M_PI;
+		x = tr.refdef.width / tan( r_fov->value / 360 * M_PI );
+		fov_y = atan2( tr.refdef.height, x );
+		fov_y = fov_y * 360 / M_PI;
 
-			tr.refdef.fov_x = r_fov->value;
-			tr.refdef.fov_y = fov_y;
-		} else {
-			tr.refdef.fov_x = fd->fov_x;
-			tr.refdef.fov_y = fd->fov_y;
-		}
+		tr.refdef.fov_x = r_fov->value;
+		tr.refdef.fov_y = fov_y;
+	
 	} else {
 		tr.refdef.fov_x = fd->fov_x;
 		tr.refdef.fov_y = fd->fov_y;
