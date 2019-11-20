@@ -198,6 +198,7 @@ or configs will never get loaded from disk!
 
 // every time a new demo pk3 file is built, this checksum must be updated.
 // the easiest way to get it is to just run the game and see what it spits out
+/*
 #define	DEMO_PAK0_CHECKSUM	2985612116u
 static const unsigned pak_checksums[] = {
 	1566731103u,
@@ -210,7 +211,7 @@ static const unsigned pak_checksums[] = {
 	908855077u,
 	977125798u
 };
-
+*/
 // if this is defined, the executable positively won't work with any paks other
 // than the demo pak, even if productid is present.  This is only used for our
 // last demo release to prevent the mac and linux users from using the demo
@@ -358,7 +359,7 @@ void Com_AppendCDKey( const char *filename );
 void Com_ReadCDKey( const char *filename );
 
 static int FS_GetModList( char *listbuf, int bufsize );
-static void FS_CheckIdPaks( void );
+//static void FS_CheckIdPaks( void );
 void FS_Reload( void );
 
 
@@ -4492,7 +4493,7 @@ static void FS_Startup( void ) {
 	}
 
 	fs_homepath = Cvar_Get( "fs_homepath", homePath, CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
-	fs_gamedirvar = Cvar_Get( "fs_game", "", CVAR_INIT | CVAR_SYSTEMINFO );
+	fs_gamedirvar = Cvar_Get( "fs_game", BASEGAME, CVAR_INIT | CVAR_SYSTEMINFO );
 	Cvar_CheckRange( fs_gamedirvar, NULL, NULL, CV_FSPATH );
 
 	if ( !Q_stricmp( fs_basegame->string, fs_gamedirvar->string ) ) {
@@ -4574,10 +4575,11 @@ static void FS_Startup( void ) {
 
 	fs_gamedirvar->modified = qfalse; // We just loaded, it's not modified
 
+/*
 	// check original q3a files
 	if ( !Q_stricmp( fs_basegame->string, BASEGAME ) || !Q_stricmp( fs_basegame->string, BASEDEMO ) )
 		FS_CheckIdPaks();
-
+*/
 #ifdef FS_MISSING
 	if (missingFiles == NULL) {
 		missingFiles = Sys_FOpen( "\\missing.txt", "ab" );
@@ -4602,6 +4604,7 @@ Note: If you're building a game that doesn't depend on the
 Q3 media pak0.pk3, you'll want to remove this function
 ===================
 */
+/*
 static void FS_CheckIdPaks( void )
 {
 	searchpath_t	*path;
@@ -4693,7 +4696,7 @@ static void FS_CheckIdPaks( void )
 			Com_Error(ERR_FATAL, "\n*** you need to install Quake III Arena in order to play ***");
 	}
 }
-
+*/
 
 /*
 =====================

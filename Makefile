@@ -59,6 +59,14 @@ ifndef USE_AUTH
   USE_AUTH=1
 endif
 
+ifndef USE_Q3KEY
+  USE_Q3KEY=1
+endif
+
+ifndef USE_MD5
+  USE_MD5=1
+endif
+
 ifndef PLATFORM
 PLATFORM=$(COMPILE_PLATFORM)
 endif
@@ -200,6 +208,14 @@ endif
 
 ifeq ($(USE_AUTH),1)
   BASE_CFLAGS += -DUSE_AUTH=1
+endif
+
+ifeq ($(USE_Q3KEY),1)
+  BASE_CFLAGS += -DUSE_Q3KEY=1
+endif
+
+ifeq ($(USE_MD5),1)
+  BASE_CFLAGS += -DUSE_MD5=1
 endif
 
 ifdef DEFAULT_BASEDIR
