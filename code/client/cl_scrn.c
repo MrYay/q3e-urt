@@ -30,6 +30,10 @@ cvar_t		*cl_debuggraph;
 cvar_t		*cl_graphheight;
 cvar_t		*cl_graphscale;
 cvar_t		*cl_graphshift;
+cvar_t		*cl_drawdemoname;
+cvar_t		*cl_demodrawheight;
+cvar_t		*cl_demodrawwidth;
+cvar_t		*cl_demodrawscale;
 
 /*
 ================
@@ -374,9 +378,15 @@ void SCR_DrawDemoRecording( void ) {
 	}
 
 	pos = FS_FTell( clc.recordfile );
-	sprintf( string, "RECORDING %s: %ik", clc.recordNameShort, pos / 1024 );
 
-	SCR_DrawStringExt( 320 - strlen( string ) * 4, 20, 8, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+	if( cl_drawdemoname->integer ) {
+		sprintf( string, "RECORDING %s: %ik", clc.recordNameShort, pos / 1024 );
+	} else {
+		sprintf( string, "RECORDING: %ik", pos / 1024 );
+	}
+
+
+	SCR_DrawStringExt( cl_demodrawwidth->integer, cl_demodrawheight->integer, cl_demodrawscale->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
 
 
@@ -490,6 +500,10 @@ void SCR_Init( void ) {
 	cl_graphheight = Cvar_Get ("graphheight", "32", CVAR_CHEAT);
 	cl_graphscale = Cvar_Get ("graphscale", "1", CVAR_CHEAT);
 	cl_graphshift = Cvar_Get ("graphshift", "0", CVAR_CHEAT);
+	cl_drawdemoname = Cvar_Get("cl_drawdemoname", "0", CVAR_ARCHIVE_ND);
+	cl_demodrawheight = Cvar_Get("cl_demodrawheight", "240", CVAR_ARCHIVE_ND);
+	cl_demodrawwidth = Cvar_Get("cl_demodrawwidth", "1", CVAR_ARCHIVE_ND);
+	cl_demodrawscale = Cvar_Get("cl_demodrawscale", "8", CVAR_ARCHIVE_ND);
 
 	scr_initialized = qtrue;
 }

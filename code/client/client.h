@@ -389,6 +389,10 @@ extern	cvar_t	*cl_shownet;
 extern	cvar_t	*cl_autoNudge;
 extern	cvar_t	*cl_timeNudge;
 extern	cvar_t	*cl_showTimeDelta;
+extern 	cvar_t 	*cl_drawdemoname;
+extern 	cvar_t	*cl_demodrawheight;
+extern	cvar_t	*cl_demodrawwidth;
+extern	cvar_t	*cl_demodrawscale;
 
 extern	cvar_t	*cl_timedemo;
 extern	cvar_t	*cl_aviFrameRate;
