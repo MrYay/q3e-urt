@@ -1189,7 +1189,7 @@ static intptr_t CL_UISystemCalls( intptr_t *args ) {
 			const char * destination = VMA(4);
 
 			NET_StringToAdr( destination, &addr, NA_IP);
-			NET_SendPacket( args[1], args[2], VMA(3), (const netadr_t *) &addr );
+			NET_SendPacket( args[1], args[2], VMA(3), &addr );
 		}
 		return 0;
 
