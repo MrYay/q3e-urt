@@ -71,6 +71,7 @@ console_t	con;
 
 cvar_t		*con_conspeed;
 cvar_t		*con_notifytime;
+cvar_t 		*con_timestamp;
 
 int         g_console_field_width = DEFAULT_CONSOLE_WIDTH;
 
@@ -383,6 +384,7 @@ void Con_Init( void )
 {
 	con_notifytime = Cvar_Get( "con_notifytime", "3", 0 );
 	con_conspeed = Cvar_Get( "scr_conspeed", "3", 0 );
+	con_timestamp = Cvar_Get( "con_timestamp", "1", CVAR_ARCHIVE );
 
 	Field_Clear( &g_consoleField );
 	g_consoleField.widthInChars = g_console_field_width;
@@ -500,13 +502,20 @@ All console printing must go through this in order to be logged to disk
 If no console is visible, the text will appear at the top of the game window
 ================
 */
-void CL_ConsolePrint( const char *txt ) {
+void CL_ConsolePrint( char *txt ) {
 	int		y;
 	int		c, l;
 	int		colorIndex;
 	qboolean skipnotify = qfalse;		// NERVE - SMF
 	int prev;							// NERVE - SMF
 
+	if (con.x==0 && con_timestamp && con_timestamp->integer) {
+		char txtt[MAXPRINTMSG];
+		qtime_t	now;
+		Com_RealTime( &now );
+		Com_sprintf(txtt,sizeof(txtt),"^9%02d:%02d:%02d ^7%s",now.tm_hour,now.tm_min,now.tm_sec,txt);
+		strcpy(txt,txtt);
+	}
 	// TTimo - prefix for text that shows up in console but not in notify
 	// backported from RTCW
 	if ( !Q_strncmp( txt, "[skipnotify]", 12 ) ) {
