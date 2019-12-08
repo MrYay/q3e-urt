@@ -162,6 +162,8 @@ cvar_t	*r_marksOnTriangleMeshes;
 
 cvar_t	*r_aviMotionJpegQuality;
 cvar_t	*r_screenshotJpegQuality;
+cvar_t  *r_overrideview;
+cvar_t  *r_fov;
 
 cvar_t	*r_maxpolys;
 int		max_polys;
@@ -1594,6 +1596,9 @@ static void R_Register( void )
 
 	r_fbo = ri.Cvar_Get( "r_fbo", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_hdr = ri.Cvar_Get( "r_hdr", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
+
+	r_overrideview = ri.Cvar_Get( "r_overrideview", "0", CVAR_ARCHIVE_ND );
+	r_fov = ri.Cvar_Get( "r_fov", "125", CVAR_ARCHIVE_ND );
 
 	r_ext_multisample = ri.Cvar_Get( "r_ext_multisample", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_ext_multisample, "0", "64", CV_INTEGER );
