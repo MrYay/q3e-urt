@@ -34,6 +34,7 @@ cvar_t		*cl_drawdemoname;
 cvar_t		*cl_demodrawheight;
 cvar_t		*cl_demodrawwidth;
 cvar_t		*cl_demodrawscale;
+cvar_t 		*cl_drawspeedo;
 
 /*
 ================
@@ -389,6 +390,20 @@ void SCR_DrawDemoRecording( void ) {
 	SCR_DrawStringExt( cl_demodrawwidth->integer, cl_demodrawheight->integer, cl_demodrawscale->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
 
+static void SCR_DrawSpeedo( void )
+{
+	int speed;
+	char string[32];
+
+	if( !cl_drawspeedo->integer || cls.state != CA_ACTIVE )
+		return;
+
+	speed = (int) sqrt(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
+
+	sprintf( string, "Speed: %d", speed );
+
+	SCR_DrawStringExt( 250, 240, 6, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+}
 
 #ifdef USE_VOIP
 /*
@@ -504,6 +519,7 @@ void SCR_Init( void ) {
 	cl_demodrawheight = Cvar_Get("cl_demodrawheight", "240", CVAR_ARCHIVE_ND);
 	cl_demodrawwidth = Cvar_Get("cl_demodrawwidth", "1", CVAR_ARCHIVE_ND);
 	cl_demodrawscale = Cvar_Get("cl_demodrawscale", "8", CVAR_ARCHIVE_ND);
+	cl_drawspeedo = Cvar_Get("cl_drawspeedo", "0", CVAR_ARCHIVE_ND);
 
 	scr_initialized = qtrue;
 }
@@ -589,6 +605,7 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	// console draws next
 	Con_DrawConsole ();
 
+	SCR_DrawSpeedo ();
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {
 		SCR_DrawDebugGraph ();
