@@ -401,7 +401,7 @@ static void SCR_DrawSpeedo( void )
 	if( !cl_drawspeedo->integer )
 		return;
 
-	speed = (int) sqrtf(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
+	speed = (int) sqrt(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
 
 	sprintf( string, "Speed: %d up/s", speed );
 
