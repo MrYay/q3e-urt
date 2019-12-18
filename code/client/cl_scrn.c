@@ -35,6 +35,9 @@ cvar_t		*cl_demodrawheight;
 cvar_t		*cl_demodrawwidth;
 cvar_t		*cl_demodrawscale;
 cvar_t 		*cl_drawspeedo;
+cvar_t 		*cl_speedoX;
+cvar_t		*cl_speedoY;
+cvar_t 		*cl_speedoSize;
 
 /*
 ================
@@ -393,16 +396,16 @@ void SCR_DrawDemoRecording( void ) {
 static void SCR_DrawSpeedo( void )
 {
 	int speed;
-	char string[32];
+	char string[64];
 
-	if( !cl_drawspeedo->integer || cls.state != CA_ACTIVE )
+	if( !cl_drawspeedo->integer )
 		return;
 
-	speed = (int) sqrt(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
+	speed = (int) sqrtf(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
 
-	sprintf( string, "Speed: %d", speed );
+	sprintf( string, "Speed: %d up/s", speed );
 
-	SCR_DrawStringExt( 250, 240, 6, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
 
 #ifdef USE_VOIP
@@ -520,6 +523,9 @@ void SCR_Init( void ) {
 	cl_demodrawwidth = Cvar_Get("cl_demodrawwidth", "1", CVAR_ARCHIVE_ND);
 	cl_demodrawscale = Cvar_Get("cl_demodrawscale", "8", CVAR_ARCHIVE_ND);
 	cl_drawspeedo = Cvar_Get("cl_drawspeedo", "0", CVAR_ARCHIVE_ND);
+	cl_speedoX = Cvar_Get("cl_speedoX", "250", CVAR_ARCHIVE_ND);
+	cl_speedoY = Cvar_Get("cl_speedoY", "240", CVAR_ARCHIVE_ND);
+	cl_speedoSize = Cvar_Get("cl_speedoSize", "6", CVAR_ARCHIVE_ND);
 
 	scr_initialized = qtrue;
 }
@@ -590,6 +596,7 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			// always supply STEREO_CENTER as vieworg offset is now done by the engine.
 			CL_CGameRendering( stereoFrame );
 			SCR_DrawDemoRecording();
+			SCR_DrawSpeedo();
 #ifdef USE_VOIP
 			SCR_DrawVoipMeter();
 #endif
@@ -605,7 +612,6 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 	// console draws next
 	Con_DrawConsole ();
 
-	SCR_DrawSpeedo ();
 	// debug graph can be drawn on top of anything
 	if ( cl_debuggraph->integer || cl_timegraph->integer || cl_debugMove->integer ) {
 		SCR_DrawDebugGraph ();
