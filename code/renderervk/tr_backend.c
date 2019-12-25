@@ -57,8 +57,8 @@ void GL_Bind( image_t *image ) {
 
 	//if ( glState.currenttextures[glState.currenttmu] != texnum ) {
 		image->frameUsed = tr.frameCount;
-		//glState.currenttextures[glState.currenttmu] = texnum;
-		vk_world.current_descriptor_sets[ glState.currenttmu ] = image->descriptor;
+		vk_update_descriptor( glState.currenttmu + 1, image->descriptor );
+
 	//}
 #else
 	GLuint texnum;
@@ -396,6 +396,7 @@ static void SetViewportAndScissor( void ) {
 #ifdef USE_VULKAN
 	//Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
 	//vk_update_mvp();
+	vk.updateViewport = qtrue;
 #else
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( backEnd.viewParms.projectionMatrix );
@@ -742,11 +743,12 @@ static void RB_BeginDrawingLitSurfs( void )
 	// we will only draw a sun if there was sky rendered in this view
 	backEnd.skyRenderedThisView = qfalse;
 
-#ifndef USE_VULKAN
 	//
 	// set the modelview matrix for the viewer
 	//
 	SetViewportAndScissor();
+
+#ifndef USE_VULKAN
 
 	glState.faceCulling = -1;		// force face culling to set next time
 
@@ -984,6 +986,8 @@ void RB_SetGL2D( void ) {
 #ifdef USE_VULKAN
 	if ( vk.frame_count )
 		vk_update_mvp( NULL );
+
+	vk.updateViewport = qtrue;
 #else
 	// set 2D virtual screen size
 	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
@@ -1315,6 +1319,7 @@ static const void *RB_DrawBuffer( const void *data ) {
 	vk_begin_frame();
 
 	tess.depthRange = DEPTH_RANGE_NORMAL;
+	vk.updateViewport = qtrue;
 
 	if ( r_clear->integer ) {
 		//const float color[4] = {1, 0, 0.5, 1};
@@ -1407,7 +1412,7 @@ void RB_ShowImages( void )
 		tess.svars.texcoords[0][3][1] = 1;
 
 		vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA | TESS_ST0 );
-		vk_draw_geometry( vk.images_debug_pipeline, 1, DEPTH_RANGE_NORMAL, qtrue );
+		vk_draw_geometry( vk.images_debug_pipeline, DEPTH_RANGE_NORMAL, qtrue );
 	}
 
 	tess.numIndexes = 0;

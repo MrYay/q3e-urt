@@ -68,6 +68,7 @@ PFN_vkCreateGraphicsPipelines					qvkCreateGraphicsPipelines;
 PFN_vkCreateImage								qvkCreateImage;
 PFN_vkCreateImageView							qvkCreateImageView;
 PFN_vkCreatePipelineLayout						qvkCreatePipelineLayout;
+PFN_vkCreatePipelineCache						qvkCreatePipelineCache;
 PFN_vkCreateRenderPass							qvkCreateRenderPass;
 PFN_vkCreateSampler								qvkCreateSampler;
 PFN_vkCreateSemaphore							qvkCreateSemaphore;
@@ -82,6 +83,7 @@ PFN_vkDestroyFramebuffer						qvkDestroyFramebuffer;
 PFN_vkDestroyImage								qvkDestroyImage;
 PFN_vkDestroyImageView							qvkDestroyImageView;
 PFN_vkDestroyPipeline							qvkDestroyPipeline;
+PFN_vkDestroyPipelineCache						qvkDestroyPipelineCache;
 PFN_vkDestroyPipelineLayout						qvkDestroyPipelineLayout;
 PFN_vkDestroyRenderPass							qvkDestroyRenderPass;
 PFN_vkDestroySampler							qvkDestroySampler;
@@ -111,6 +113,10 @@ PFN_vkCreateSwapchainKHR						qvkCreateSwapchainKHR;
 PFN_vkDestroySwapchainKHR						qvkDestroySwapchainKHR;
 PFN_vkGetSwapchainImagesKHR						qvkGetSwapchainImagesKHR;
 PFN_vkQueuePresentKHR							qvkQueuePresentKHR;
+
+PFN_vkGetBufferMemoryRequirements2KHR			qvkGetBufferMemoryRequirements2KHR;
+PFN_vkGetImageMemoryRequirements2KHR			qvkGetImageMemoryRequirements2KHR;
+
 ////////////////////////////////////////////////////////////////////////////
 
 // forward declaration
@@ -373,7 +379,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[2].flags = 0;
 		attachments[2].format = vk.color_format;
 		attachments[2].samples = vkSamples;
-		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // Assuming this will be completely overwritten
+		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
 		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -442,7 +448,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass2 ) );
+	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass_gamma ) );
 }
 
 
@@ -713,7 +719,7 @@ static void get_surface_formats( void )
 }
 
 
-static void create_device( void ) {
+static void vk_create_device( void ) {
 
 	VkPhysicalDevice *physical_devices;
 	uint32_t device_count;
@@ -753,7 +759,7 @@ static void create_device( void ) {
 
 		VK_CHECK( qvkGetPhysicalDeviceSurfaceFormatsKHR( vk.physical_device, vk.surface, &format_count, NULL ) );
 		if ( format_count == 0 )
-			ri.Error( ERR_FATAL, "Vulkan: no surface formats found" );
+			ri.Error( ERR_FATAL, "%s: no surface formats found", __func__ );
 
 		candidates = (VkSurfaceFormatKHR*) ri.Malloc( format_count * sizeof(VkSurfaceFormatKHR) );
 
@@ -808,19 +814,25 @@ static void create_device( void ) {
 		ri.Free( queue_families );
 
 		if ( vk.queue_family_index == ~0U )
-			ri.Error(ERR_FATAL, "Vulkan: failed to find queue family");
+			ri.Error( ERR_FATAL, "%s: failed to find queue family", __func__ );
 	}
 
 	// create VkDevice
 	{
-		const char* device_extensions[] = { VK_KHR_SWAPCHAIN_EXTENSION_NAME	};
+		const char *device_extensions[3] = {
+			VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+			VK_KHR_DEDICATED_ALLOCATION_EXTENSION_NAME,
+			VK_KHR_GET_MEMORY_REQUIREMENTS_2_EXTENSION_NAME
+		};
 		const float priority = 1.0;
-		VkExtensionProperties *extension_properties, *p;
+		VkExtensionProperties *extension_properties;
 		VkDeviceQueueCreateInfo queue_desc;
 		VkPhysicalDeviceFeatures device_features;
 		VkPhysicalDeviceFeatures features;
 		VkDeviceCreateInfo device_desc;
-		qboolean supported = qfalse;
+		qboolean swapchainSupported = qfalse;
+		qboolean dedicatedAllocation = qfalse;
+		qboolean memoryRequirements2 = qfalse;
 		uint32_t i, count = 0;
 
 		VK_CHECK(qvkEnumerateDeviceExtensionProperties(vk.physical_device, NULL, &count, NULL));
@@ -828,23 +840,30 @@ static void create_device( void ) {
 		VK_CHECK(qvkEnumerateDeviceExtensionProperties(vk.physical_device, NULL, &count, extension_properties));
 
 		for (i = 0; i < count; i++) {
-			p = extension_properties + i;
-			if (strcmp(p->extensionName, device_extensions[0]) == 0) {
-				supported = qtrue;
-				break;
+			if ( strcmp( extension_properties[i].extensionName, device_extensions[0] ) == 0 ) {
+				swapchainSupported = qtrue;
+			} else if ( strcmp( extension_properties[i].extensionName, device_extensions[1] ) == 0 ) {
+				dedicatedAllocation = qtrue;
+			} else if ( strcmp( extension_properties[i].extensionName, device_extensions[2] ) == 0 ) {
+				memoryRequirements2 = qtrue;
 			}
 		}
 
 		ri.Free( extension_properties );
 
-		if ( !supported )
-			ri.Error( ERR_FATAL, "Vulkan: required device extension is not available: %s", device_extensions[0] );
+		if ( !swapchainSupported )
+			ri.Error( ERR_FATAL, "%s: required device extension is not available: %s", __func__, device_extensions[0] );
+
+		if ( !memoryRequirements2 )
+			dedicatedAllocation = qfalse;
+		else
+			vk.dedicatedAllocation = dedicatedAllocation;
 
 		qvkGetPhysicalDeviceFeatures( vk.physical_device, &device_features );
 		if ( device_features.shaderClipDistance == VK_FALSE )
-			ri.Error( ERR_FATAL, "vk_create_device: shaderClipDistance feature is not supported" );
+			ri.Error( ERR_FATAL, "%s: shaderClipDistance feature is not supported", __func__ );
 		if ( device_features.fillModeNonSolid == VK_FALSE )
-			ri.Error( ERR_FATAL, "vk_create_device: fillModeNonSolid feature is not supported" );
+			ri.Error( ERR_FATAL, "%s: fillModeNonSolid feature is not supported", __func__ );
 
 		queue_desc.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
 		queue_desc.pNext = NULL;
@@ -879,7 +898,7 @@ static void create_device( void ) {
 		device_desc.pQueueCreateInfos = &queue_desc;
 		device_desc.enabledLayerCount = 0;
 		device_desc.ppEnabledLayerNames = NULL;
-		device_desc.enabledExtensionCount = ARRAY_LEN( device_extensions );
+		device_desc.enabledExtensionCount = vk.dedicatedAllocation ? 3 : 1;
 		device_desc.ppEnabledExtensionNames = device_extensions;
 		device_desc.pEnabledFeatures = &features;
 
@@ -890,15 +909,19 @@ static void create_device( void ) {
 
 #define INIT_INSTANCE_FUNCTION(func) \
 	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr(vk.instance, #func); \
-    if (q##func == NULL) {                                                 \
-        ri.Error(ERR_FATAL, "Failed to find entrypoint %s", #func);        \
+	if (q##func == NULL) {											\
+		ri.Error(ERR_FATAL, "Failed to find entrypoint %s", #func);	\
 	}
 
 #define INIT_DEVICE_FUNCTION(func) \
 	q##func = (PFN_ ## func) qvkGetDeviceProcAddr(vk.device, #func);\
-    if (q##func == NULL) {											\
-        ri.Error(ERR_FATAL, "Failed to find entrypoint %s", #func);	\
+	if (q##func == NULL) {											\
+		ri.Error(ERR_FATAL, "Failed to find entrypoint %s", #func);	\
 	}
+
+#define INIT_DEVICE_FUNCTION_EXT(func) \
+	q##func = (PFN_ ## func) qvkGetDeviceProcAddr(vk.device, #func);
+
 
 static void init_vulkan_library( void )
 {
@@ -953,7 +976,7 @@ static void init_vulkan_library( void )
 	//
 	// Get device level functions.
 	//
-	create_device();
+	vk_create_device();
 
 	INIT_DEVICE_FUNCTION(vkAllocateCommandBuffers)
 	INIT_DEVICE_FUNCTION(vkAllocateDescriptorSets)
@@ -989,6 +1012,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkCreateGraphicsPipelines)
 	INIT_DEVICE_FUNCTION(vkCreateImage)
 	INIT_DEVICE_FUNCTION(vkCreateImageView)
+	INIT_DEVICE_FUNCTION(vkCreatePipelineCache)
 	INIT_DEVICE_FUNCTION(vkCreatePipelineLayout)
 	INIT_DEVICE_FUNCTION(vkCreateRenderPass)
 	INIT_DEVICE_FUNCTION(vkCreateSampler)
@@ -1004,6 +1028,7 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkDestroyImage)
 	INIT_DEVICE_FUNCTION(vkDestroyImageView)
 	INIT_DEVICE_FUNCTION(vkDestroyPipeline)
+	INIT_DEVICE_FUNCTION(vkDestroyPipelineCache)
 	INIT_DEVICE_FUNCTION(vkDestroyPipelineLayout)
 	INIT_DEVICE_FUNCTION(vkDestroyRenderPass)
 	INIT_DEVICE_FUNCTION(vkDestroySampler)
@@ -1033,10 +1058,19 @@ static void init_vulkan_library( void )
 	INIT_DEVICE_FUNCTION(vkDestroySwapchainKHR)
 	INIT_DEVICE_FUNCTION(vkGetSwapchainImagesKHR)
 	INIT_DEVICE_FUNCTION(vkQueuePresentKHR)
+
+	if ( vk.dedicatedAllocation ) {
+		INIT_DEVICE_FUNCTION_EXT(vkGetBufferMemoryRequirements2KHR);
+		INIT_DEVICE_FUNCTION_EXT(vkGetImageMemoryRequirements2KHR);
+		if ( !qvkGetBufferMemoryRequirements2KHR || !qvkGetImageMemoryRequirements2KHR ) {
+			vk.dedicatedAllocation = qfalse;
+		}
+	}
 }
 
 #undef INIT_INSTANCE_FUNCTION
 #undef INIT_DEVICE_FUNCTION
+#undef INIT_DEVICE_FUNCTION_EXT
 
 static void deinit_vulkan_library( void )
 {
@@ -1096,6 +1130,7 @@ static void deinit_vulkan_library( void )
 	qvkCreateGraphicsPipelines					= NULL;
 	qvkCreateImage								= NULL;
 	qvkCreateImageView							= NULL;
+	qvkCreatePipelineCache						= NULL;
 	qvkCreatePipelineLayout						= NULL;
 	qvkCreateRenderPass							= NULL;
 	qvkCreateSampler							= NULL;
@@ -1111,6 +1146,7 @@ static void deinit_vulkan_library( void )
 	qvkDestroyImage								= NULL;
 	qvkDestroyImageView							= NULL;
 	qvkDestroyPipeline							= NULL;
+	qvkDestroyPipelineCache						= NULL;
 	qvkDestroyPipelineLayout					= NULL;
 	qvkDestroyRenderPass						= NULL;
 	qvkDestroySampler							= NULL;
@@ -1140,6 +1176,9 @@ static void deinit_vulkan_library( void )
 	qvkDestroySwapchainKHR						= NULL;
 	qvkGetSwapchainImagesKHR					= NULL;
 	qvkQueuePresentKHR							= NULL;
+
+	qvkGetBufferMemoryRequirements2KHR			= NULL;
+	qvkGetImageMemoryRequirements2KHR			= NULL;
 }
 
 
@@ -1329,21 +1368,12 @@ void vk_init_buffers( void )
 		}
 	}
 #endif
-
-
-//	vk_world.current_descriptor_sets[0] = tr.whiteImage->descriptor;
-//	vk_world.current_descriptor_sets[1] = tr.whiteImage->descriptor;
-//	vk_world.current_descriptor_sets[2] = tr.fogImage->descriptor;
 }
 
 
 void vk_bind_fog_image( void )
 {
-	if ( !vk.cmd->fog_bound ) {
-		VkDescriptorSet fog_desc = tr.fogImage->descriptor;
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, 3, 1, &fog_desc, 0, NULL );
-		vk.cmd->fog_bound = qtrue;
-	}
+	vk_update_descriptor( 3, tr.fogImage->descriptor );
 }
 
 static VkCommandBuffer begin_command_buffer( void )
@@ -1821,9 +1851,9 @@ static void vk_create_persistent_pipelines( void )
 						for ( l = 0; l < 2; l++ ) {
 							def.fog_stage = l; // fogStage
 							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
-							vk.dlight_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, r_dlightMode->integer != 0 ? qtrue : qfalse );
+							vk.dlight_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
 							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING1;
-							vk.dlight1_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, r_dlightMode->integer != 0 ? qtrue : qfalse );
+							vk.dlight1_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
 						}
 					}
 				}
@@ -2086,12 +2116,42 @@ static void vk_add_attachment_desc( VkImage desc, VkImageView *image_view, VkMem
 	}
 }
 
+
+static void vk_get_image_memory_erquirements( VkImage image, VkMemoryRequirements *memory_requirements )
+{
+	if ( vk.dedicatedAllocation ) {
+		VkMemoryRequirements2KHR memory_requirements2;
+		VkImageMemoryRequirementsInfo2KHR image_requirements2;
+		VkMemoryDedicatedRequirementsKHR mem_req2;
+
+		Com_Memset( &mem_req2, 0, sizeof( mem_req2 ) );
+		mem_req2.sType = VK_STRUCTURE_TYPE_MEMORY_DEDICATED_REQUIREMENTS_KHR;
+
+		image_requirements2.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_REQUIREMENTS_INFO_2_KHR;
+		image_requirements2.image = image;
+		image_requirements2.pNext = NULL;
+
+		Com_Memset( &memory_requirements2, 0, sizeof( memory_requirements2 ) );
+		memory_requirements2.sType = VK_STRUCTURE_TYPE_MEMORY_REQUIREMENTS_2_KHR;
+		memory_requirements2.pNext = &mem_req2;
+
+		qvkGetImageMemoryRequirements2KHR( vk.device, &image_requirements2, &memory_requirements2 );
+
+		*memory_requirements = memory_requirements2.memoryRequirements;
+	} else {
+		qvkGetImageMemoryRequirements( vk.device, image, memory_requirements );
+	}
+}
+
+
 static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCountFlagBits samples, VkFormat format,
 	VkImageUsageFlags usage, VkImage *image, VkImageView *image_view, VkDeviceMemory *image_memory, qboolean multisample )
 {
 	VkImageCreateInfo create_desc;
 	VkMemoryRequirements memory_requirements;
+
 #ifndef USE_IMAGE_POOL
+	VkMemoryDedicatedAllocateInfoKHR alloc_info2;
 	VkMemoryAllocateInfo alloc_info;
 	VkImageViewCreateInfo view_desc;
 	VkCommandBuffer command_buffer;
@@ -2117,7 +2177,7 @@ static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCo
 	create_desc.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
 
-	qvkGetImageMemoryRequirements( vk.device, *image, &memory_requirements );
+	vk_get_image_memory_erquirements( *image, &memory_requirements );
 
 #ifdef USE_IMAGE_POOL
 	if ( !multisample )
@@ -2125,11 +2185,20 @@ static void create_color_attachment( uint32_t width, uint32_t height, VkSampleCo
 	else
 		vk_add_attachment_desc( *image, image_view, &memory_requirements, format, VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
 #else
+
 	// allocate color image memory
 	alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	alloc_info.pNext = NULL;
 	alloc_info.allocationSize = memory_requirements.size;
 	alloc_info.memoryTypeIndex = find_memory_type( vk.physical_device, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+
+	if ( vk.dedicatedAllocation ) {
+		Com_Memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
+		alloc_info2.sType =  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
+		alloc_info2.image = *image;
+		alloc_info.pNext = &alloc_info2;
+	}
+
 	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, image_memory ) );
 	VK_CHECK( qvkBindImageMemory( vk.device, *image, *image_memory, 0 ) );
 
@@ -2170,6 +2239,7 @@ static void create_depth_attachment( uint32_t width, uint32_t height, VkSampleCo
 	VkMemoryRequirements memory_requirements;
 	VkImageAspectFlags image_aspect_flags;
 #ifndef USE_IMAGE_POOL
+	VkMemoryDedicatedAllocateInfoKHR alloc_info2;
 	VkMemoryAllocateInfo alloc_info;
 	VkImageViewCreateInfo view_desc;
 	VkCommandBuffer command_buffer;
@@ -2200,7 +2270,7 @@ static void create_depth_attachment( uint32_t width, uint32_t height, VkSampleCo
 
 	VK_CHECK( qvkCreateImage( vk.device, &create_desc, NULL, image ) );
 
-	qvkGetImageMemoryRequirements( vk.device, *image, &memory_requirements );
+	vk_get_image_memory_erquirements( *image, &memory_requirements );
 
 #ifdef USE_IMAGE_POOL
 	vk_add_attachment_desc( *image, image_view, &memory_requirements, vk.depth_format, image_aspect_flags, VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL );
@@ -2210,6 +2280,14 @@ static void create_depth_attachment( uint32_t width, uint32_t height, VkSampleCo
 	alloc_info.pNext = NULL;
 	alloc_info.allocationSize = memory_requirements.size;
 	alloc_info.memoryTypeIndex = find_memory_type( vk.physical_device, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT );
+
+	if ( vk.dedicatedAllocation ) {
+		Com_Memset( &alloc_info2, 0, sizeof( alloc_info2 ) );
+		alloc_info2.sType =  VK_STRUCTURE_TYPE_MEMORY_DEDICATED_ALLOCATE_INFO_KHR;
+		alloc_info2.image = *image;
+		alloc_info.pNext = &alloc_info2;
+	}
+
 	VK_CHECK( qvkAllocateMemory( vk.device, &alloc_info, NULL, image_memory ) );
 	VK_CHECK( qvkBindImageMemory( vk.device, *image, *image_memory, 0 ) );
 
@@ -2307,7 +2385,7 @@ static void vk_create_framebuffers( void )
 #else
 			VK_CHECK( qvkCreateFramebuffer( vk.device, &desc, NULL, &vk.tess[i].framebuffers[n] ) );
 #endif
-			desc.renderPass = vk.render_pass2;
+			desc.renderPass = vk.render_pass_gamma;
 			desc.attachmentCount = 1;
 			desc.width = vk.windowWidth;
 			desc.height = vk.windowHeight;
@@ -2680,12 +2758,12 @@ void vk_initialize( void )
 		// post-processing/msaa-resolve
 		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.resolve_format,
 			VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_INPUT_ATTACHMENT_BIT,
-			&vk.color_image, &vk.color_image_view, &vk.color_image_memory );
+			&vk.color_image, &vk.color_image_view, &vk.color_image_memory, qfalse );
 	}
 	if ( /* vk.fboActive && */ vk.msaaActive ) {
 		// msaa
 		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples, vk.color_format, VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
-			&vk.msaa_image, &vk.msaa_image_view, &vk.msaa_image_memory );
+			&vk.msaa_image, &vk.msaa_image_view, &vk.msaa_image_memory, qtrue );
 	}
 	// depth
 	create_depth_attachment( glConfig.vidWidth, glConfig.vidHeight, vkSamples, &vk.depth_image, &vk.depth_image_view, &vk.depth_image_memory );
@@ -2825,6 +2903,13 @@ void vk_initialize( void )
 
 	vk_create_shader_modules();
 
+	{
+		VkPipelineCacheCreateInfo ci;
+		Com_Memset( &ci, 0, sizeof( ci ) );
+		ci.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+		VK_CHECK( qvkCreatePipelineCache( vk.device, &ci, NULL, &vk.pipelineCache ) );
+	}
+
 	vk_create_persistent_pipelines();
 
 	vk.pipelines_world_base = vk.pipelines_count;
@@ -2899,8 +2984,8 @@ void vk_shutdown( void )
 	if ( vk.render_pass != VK_NULL_HANDLE )
 		qvkDestroyRenderPass( vk.device, vk.render_pass, NULL );
 
-	if ( vk.render_pass2 != VK_NULL_HANDLE )
-		qvkDestroyRenderPass( vk.device, vk.render_pass2, NULL );
+	if ( vk.render_pass_gamma != VK_NULL_HANDLE )
+		qvkDestroyRenderPass( vk.device, vk.render_pass_gamma, NULL );
 
 	qvkDestroyCommandPool( vk.device, vk.command_pool, NULL );
 
@@ -2918,6 +3003,10 @@ void vk_shutdown( void )
 
 	if ( vk.gamma_pipeline ) {
 		qvkDestroyPipeline( vk.device, vk.gamma_pipeline, NULL );
+	}
+
+	if ( vk.pipelineCache != VK_NULL_HANDLE ) {
+		qvkDestroyPipelineCache( vk.device, vk.pipelineCache, NULL );
 	}
 
 	qvkDestroyDescriptorPool(vk.device, vk.descriptor_pool, NULL);
@@ -3397,7 +3486,7 @@ void vk_create_gamma_pipeline( void ) {
 	create_info.pColorBlendState = &blend_state;
 	create_info.pDynamicState = NULL;
 	create_info.layout = vk.pipeline_layout_gamma;
-	create_info.renderPass = vk.render_pass2;
+	create_info.renderPass = vk.render_pass_gamma;
 	create_info.subpass = 0;
 	create_info.basePipelineHandle = VK_NULL_HANDLE;
 	create_info.basePipelineIndex = -1;
@@ -3900,7 +3989,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def ) {
 	create_info.basePipelineHandle = VK_NULL_HANDLE;
 	create_info.basePipelineIndex = -1;
 
-	VK_CHECK( qvkCreateGraphicsPipelines( vk.device, VK_NULL_HANDLE, 1, &create_info, NULL, &pipeline ) );
+	VK_CHECK( qvkCreateGraphicsPipelines( vk.device, vk.pipelineCache, 1, &create_info, NULL, &pipeline ) );
 
 	vk.pipeline_create_count++;
 		
@@ -4034,18 +4123,17 @@ VkSampler vk_find_sampler( const Vk_Sampler_Def *def ) {
 
 uint32_t vk_find_pipeline_ext( uint32_t base, const Vk_Pipeline_Def *def, qboolean use ) {
 	const Vk_Pipeline_Def *cur_def;
-	uint32_t index, i;
+	uint32_t index;
 
-	for ( i = base; i < vk.pipelines_count; i++ ) {
-		cur_def = &vk.pipelines[i].def;
+	for ( index = base; index < vk.pipelines_count; index++ ) {
+		cur_def = &vk.pipelines[ index ].def;
 		if ( memcmp( cur_def, def, sizeof( *def ) ) == 0 ) {
-			if ( use )
-				vk_gen_pipeline( i );
-			return i;
+			goto found;
 		}
 	}
 
 	index = vk_alloc_pipeline( def );
+found:
 
 	if ( use )
 		vk_gen_pipeline( index );
@@ -4337,6 +4425,16 @@ uint32_t vk_tess_index( uint32_t numIndexes, const void *src ) {
 }
 
 
+void vk_bind_index_buffer( VkBuffer buffer, uint32_t offset )
+{
+	if ( vk.cmd->curr_index_buffer != buffer || vk.cmd->curr_index_offset != offset )
+		qvkCmdBindIndexBuffer( vk.cmd->command_buffer, buffer, offset, VK_INDEX_TYPE_UINT32 );
+
+	vk.cmd->curr_index_buffer = buffer;
+	vk.cmd->curr_index_offset = offset;
+}
+
+
 void vk_bind_geometry_ext( int flags )
 {
 	//unsigned int size;
@@ -4391,7 +4489,7 @@ void vk_bind_geometry_ext( int flags )
 
 		if ( flags & TESS_IDX ) {
 			uint32_t offset = vk_tess_index( tess.numIndexes, tess.indexes );
-			qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.cmd->vertex_buffer, offset, VK_INDEX_TYPE_UINT32 );
+			vk_bind_index_buffer( vk.cmd->vertex_buffer, offset );
 		}
 
 		if ( flags & TESS_XYZ ) {
@@ -4421,32 +4519,83 @@ void vk_bind_geometry_ext( int flags )
 }
 
 
-void vk_draw_geometry(uint32_t pipeline, int32_t set_count, Vk_Depth_Range depth_range, qboolean indexed) {
+void vk_reset_descriptor( int index )
+{
+	vk.cmd->descriptor_set.current[ index ] = VK_NULL_HANDLE;
+}
+
+
+void vk_update_descriptor( int index, VkDescriptorSet descriptor )
+{
+	if ( vk.cmd->descriptor_set.current[ index ] != descriptor ) {
+		//if ( index > vk.cmd->descriptor_set.end )
+		//	vk.cmd->descriptor_set.end = index;
+		//if ( index < vk.cmd->descriptor_set.start )
+		//	vk.cmd->descriptor_set.start = index;
+		vk.cmd->descriptor_set.start = ( index < vk.cmd->descriptor_set.start ) ? index : vk.cmd->descriptor_set.start;
+		vk.cmd->descriptor_set.end = ( index > vk.cmd->descriptor_set.end ) ? index : vk.cmd->descriptor_set.end;
+	}
+	vk.cmd->descriptor_set.current[ index ] = descriptor;
+}
+
+
+void vk_update_descriptor_offset( int index, uint32_t offset )
+{
+	vk.cmd->descriptor_set.offset[ index ] = offset;
+}
+
+
+void vk_bind_descriptor_sets( void )
+{
+	uint32_t offsets[2], offset_count;
+	int start, end, count;
+
+	start = vk.cmd->descriptor_set.start;
+	if ( start == ~0U )
+		return;
+
+	end = vk.cmd->descriptor_set.end;
+
+	offset_count = 0;
+	if ( start == 0 ) {
+		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 0 ];
+	}
+	if ( end >= 4 ) {
+		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 1 ];
+	}
+
+	count = end - start + 1;
+
+	qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, start, count, vk.cmd->descriptor_set.current + start, offset_count, offsets );
+
+	vk.cmd->descriptor_set.end = 0;
+	vk.cmd->descriptor_set.start = ~0U;
+}
+
+
+void vk_draw_geometry( uint32_t pipeline, Vk_Depth_Range depth_range, qboolean indexed ) {
+	static Vk_Depth_Range old_range = DEPTH_RANGE_NORMAL;
 	VkPipeline vkpipe;
 	VkRect2D scissor_rect;
 	VkViewport viewport;
-	VkDescriptorSet sets[4];
 
-	// bind descriptor sets
-	if ( set_count >= 0 ) {
-		sets[0] = vk.cmd->uniform_descriptor;
-		sets[1] = vk_world.current_descriptor_sets[0]; // diffuse
-		sets[2] = vk_world.current_descriptor_sets[1]; // lightmap
-		qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout, 0, set_count+1, sets, 1, &vk.cmd->uniform_read_offset );
-	}
+	vk_bind_descriptor_sets();
 
 	// bind pipeline
 	vkpipe = vk_gen_pipeline( pipeline );
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
 
 	// configure pipeline's dynamic state
-	get_scissor_rect( &scissor_rect );
+	if ( vk.updateViewport || depth_range != old_range ) {
+		vk.updateViewport = qfalse;
+		old_range = depth_range;
 
-	qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor_rect );
+		get_scissor_rect( &scissor_rect );
+		qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor_rect );
 
-	get_viewport( &viewport, depth_range );
-
-	qvkCmdSetViewport( vk.cmd->command_buffer, 0, 1, &viewport );
+		get_viewport( &viewport, depth_range );
+		qvkCmdSetViewport( vk.cmd->command_buffer, 0, 1, &viewport );
+	}
 
 	// issue draw call(s)
 #ifdef USE_VBO
@@ -4577,8 +4726,14 @@ void vk_begin_frame( void )
 	vk.cmd->vertex_buffer_offset = 0;
 	Com_Memset( vk.cmd->buf_offset, 0, sizeof( vk.cmd->buf_offset ) );
 	Com_Memset( vk.cmd->vbo_offset, 0, sizeof( vk.cmd->vbo_offset ) );
+	vk.cmd->curr_index_buffer = VK_NULL_HANDLE;
+	vk.cmd->curr_index_offset = 0;
 
-	vk.cmd->fog_bound = qfalse;
+	Com_Memset( &vk.cmd->descriptor_set, 0, sizeof( vk.cmd->descriptor_set ) );
+	vk.cmd->descriptor_set.start = ~0U;
+	vk.cmd->descriptor_set.end = 0;
+
+	vk_update_descriptor( 2, tr.whiteImage->descriptor );
 
 	// other stats
 	vk.stats.push_size = 0;
@@ -4598,8 +4753,6 @@ void vk_end_frame( void )
 	VkSubmitInfo submit_info;
 	VkResult res;
 
-	Com_Memset( vk_world.current_descriptor_sets, 0, sizeof( vk_world.current_descriptor_sets ) );
-
 	if ( vk.frame_count == 0 )
 		return;
 
@@ -4609,11 +4762,11 @@ void vk_end_frame( void )
 		{
 			qvkCmdEndRenderPass( vk.cmd->command_buffer );
 #ifdef USE_SINGLE_FBO
-			vk_begin_render_pass( vk.render_pass2, vk.framebuffers2[ vk.swapchain_image_index ], qfalse, vk.windowWidth, vk.windowHeight );
+			vk_begin_render_pass( vk.render_pass_gamma, vk.framebuffers2[ vk.swapchain_image_index ], qfalse, vk.windowWidth, vk.windowHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_gamma, 0, 1, &vk.color_descriptor, 0, NULL );
 #else
-			vk_begin_render_pass( vk.render_pass2, vk.cmd->framebuffers2[ vk.swapchain_image_index ], qfalse, vk.windowWidth, vk.windowHeight );
+			vk_begin_render_pass( vk.render_pass_gamma, vk.cmd->framebuffers2[ vk.swapchain_image_index ], qfalse, vk.windowWidth, vk.windowHeight );
 			qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.gamma_pipeline );
 			qvkCmdBindDescriptorSets( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vk.pipeline_layout_gamma, 0, 1, &vk.cmd->color_descriptor, 0, NULL );
 #endif
