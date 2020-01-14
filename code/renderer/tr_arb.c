@@ -212,7 +212,7 @@ static void ARB_Lighting( const shaderStage_t* pStage )
 
 	GL_SelectTexture( 0 );
 
-	R_BindAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );
+	R_BindAnimatedImage( &pStage->bundle[ 0 ] );
 	
 	R_DrawElements( numIndexes, hitIndexes );
 }
@@ -231,7 +231,7 @@ static void ARB_Lighting_Fast( const shaderStage_t* pStage )
 
 	GL_SelectTexture( 0 );
 
-	R_BindAnimatedImage( &pStage->bundle[ tess.shader->lightingBundle ] );
+	R_BindAnimatedImage( &pStage->bundle[ 0 ] );
 	
 	R_DrawElements( tess.numIndexes, tess.indexes );
 }
@@ -343,7 +343,7 @@ void ARB_LightingPass( void )
 	qglDisableClientState( GL_COLOR_ARRAY );
 
 	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-	qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[ tess.shader->lightingBundle ] );
+	qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[ 0 ] );
 
 	qglEnableClientState( GL_NORMAL_ARRAY );
 	qglNormalPointer( GL_FLOAT, 16, tess.normal );
