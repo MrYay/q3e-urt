@@ -267,9 +267,11 @@ VM_Init
 ==============
 */
 void VM_Init( void ) {
-	Cvar_Get( "vm_cgame", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
-	Cvar_Get( "vm_game", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
+#ifndef DEDICATED
 	Cvar_Get( "vm_ui", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
+	Cvar_Get( "vm_cgame", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
+#endif
+	Cvar_Get( "vm_game", "2", CVAR_ARCHIVE | CVAR_PROTECTED );	// !@# SHIP WITH SET TO 2
 
 	Cmd_AddCommand( "vmprofile", VM_VmProfile_f );
 	Cmd_AddCommand( "vminfo", VM_VmInfo_f );
@@ -1296,7 +1298,7 @@ void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf ) {
 				ip++;
 				ip->op = OP_CONST;	ip->value = 110372; ip++;
 				ip->op = OP_JUMP;	ip->value = 0; ip++;
-				ip->op = OP_IGNORE; ip->value = 0; ip++;
+				ip->op = OP_IGNORE; ip->value = 0;
 			}
 			if ( buf[4358].op == OP_LOCAL && buf[4358].value == 308 && buf[4359].op == OP_CONST && !buf[4359].value ) {
 				buf[4359].value++;
@@ -1308,7 +1310,7 @@ void VM_ReplaceInstructions( vm_t *vm, instruction_t *buf ) {
 				ip++;
 				ip->op = OP_CONST;	ip->value = 110359; ip++;
 				ip->op = OP_JUMP;	ip->value = 0; ip++;
-				ip->op = OP_IGNORE; ip->value = 0; ip++;
+				ip->op = OP_IGNORE; ip->value = 0;
 			}
 			if ( buf[4358].op == OP_LOCAL && buf[4358].value == 308 && buf[4359].op == OP_CONST && !buf[4359].value ) {
 				buf[4359].value++;

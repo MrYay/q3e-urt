@@ -1163,8 +1163,8 @@ Returns NULL if it fails, not a default image.
 */
 image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 {
-	const char *localName;
 	image_t	*image;
+	const char *localName;
 	int		width, height;
 	byte	*pic;
 	int		hash;
@@ -1178,8 +1178,8 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	//
 	// see if the image is already loaded
 	//
-	for (image=hashTable[hash]; image; image=image->next) {
-		if ( !strcmp( name, image->imgName ) ) {
+	for ( image = hashTable[hash]; image; image = image->next ) {
+		if ( !Q_stricmp( name, image->imgName ) ) {
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
@@ -1824,10 +1824,6 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	tr.skins[hSkin] = skin;
 	Q_strncpyz( skin->name, name, sizeof( skin->name ) );
 	skin->numSurfaces = 0;
-
-#ifndef USE_VULKAN // FIXME: is this correct?
-	R_IssuePendingRenderCommands();
-#endif
 
 	// If not a .skin file, load as a single shader
 	if ( strcmp( name + strlen( name ) - 5, ".skin" ) ) {

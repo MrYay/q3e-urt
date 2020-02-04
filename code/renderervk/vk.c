@@ -993,6 +993,10 @@ static void vk_create_device( void ) {
 		ri.Error(ERR_FATAL, "Failed to find entrypoint %s", #func);	\
 	}
 
+#define INIT_INSTANCE_FUNCTION_EXT(func) \
+	q##func = /*(PFN_ ## func)*/ ri.VK_GetInstanceProcAddr(vk.instance, #func);
+
+
 #define INIT_DEVICE_FUNCTION(func) \
 	q##func = (PFN_ ## func) qvkGetDeviceProcAddr(vk.device, #func);\
 	if (q##func == NULL) {											\
@@ -1033,12 +1037,13 @@ static void init_vulkan_library( void )
 	INIT_INSTANCE_FUNCTION(vkGetPhysicalDeviceSurfaceSupportKHR)
 
 #ifndef NDEBUG
-	INIT_INSTANCE_FUNCTION(vkCreateDebugReportCallbackEXT)
-	INIT_INSTANCE_FUNCTION(vkDestroyDebugReportCallbackEXT)
+	INIT_INSTANCE_FUNCTION_EXT(vkCreateDebugReportCallbackEXT)
+	INIT_INSTANCE_FUNCTION_EXT(vkDestroyDebugReportCallbackEXT)
 
 	//
 	// Create debug callback.
 	//
+	if ( qvkCreateDebugReportCallbackEXT )
 	{
 		VkDebugReportCallbackCreateInfoEXT desc;
 		desc.sType = VK_STRUCTURE_TYPE_DEBUG_REPORT_CALLBACK_CREATE_INFO_EXT;
@@ -1303,6 +1308,30 @@ static void vk_create_layout_binding( int binding, VkDescriptorType type, VkShad
 }
 
 
+void vk_update_uniform_descriptor( VkDescriptorSet descriptor, VkBuffer buffer )
+{
+	VkDescriptorBufferInfo info;
+	VkWriteDescriptorSet desc;
+
+	info.buffer = buffer;
+	info.offset = 0;
+	info.range = sizeof( vkUniform_t );
+
+	desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	desc.dstSet = descriptor;
+	desc.dstBinding = 0;
+	desc.dstArrayElement = 0;
+	desc.descriptorCount = 1;
+	desc.pNext = NULL;
+	desc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
+	desc.pImageInfo = NULL;
+	desc.pBufferInfo = &info;
+	desc.pTexelBufferView = NULL;
+
+	qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+}
+
+
 void vk_init_buffers( void )
 {
 	VkDescriptorSetAllocateInfo alloc;
@@ -1346,22 +1375,7 @@ void vk_init_buffers( void )
 
 		VK_CHECK( qvkAllocateDescriptorSets( vk.device, &alloc, &vk.tess[i].uniform_descriptor ) );
 
-		info.buffer = vk.tess[ i ].vertex_buffer;
-		info.offset = 0;
-		info.range = sizeof( vkUniform_t );
-	
-		desc.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
-		desc.dstSet = vk.tess[i].uniform_descriptor;
-		desc.dstBinding = 0;
-		desc.dstArrayElement = 0;
-		desc.descriptorCount = 1;
-		desc.pNext = NULL;
-		desc.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-		desc.pImageInfo = NULL;
-		desc.pBufferInfo = &info;
-		desc.pTexelBufferView = NULL;
-
-		qvkUpdateDescriptorSets( vk.device, 1, &desc, 0, NULL );
+		vk_update_uniform_descriptor( vk.tess[ i ].uniform_descriptor, vk.tess[ i ].vertex_buffer );
 
 		// allocate color attachment descriptor if post-processing enabled
 #ifndef USE_SINGLE_FBO
@@ -1520,7 +1534,21 @@ void end_command_buffer( VkCommandBuffer command_buffer )
 }
 
 
-static void vk_create_geometry_buffers( uint32_t size )
+static void vk_release_geometry_buffers( void )
+{
+	int i;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
+		qvkDestroyBuffer( vk.device, vk.tess[i].vertex_buffer, NULL );
+		vk.tess[i].vertex_buffer = VK_NULL_HANDLE;
+	}
+
+	qvkFreeMemory( vk.device, vk.geometry_buffer_memory, NULL );
+	vk.geometry_buffer_memory = VK_NULL_HANDLE;
+}
+
+
+static void vk_create_geometry_buffers( VkDeviceSize size )
 {
 	VkMemoryRequirements vb_memory_requirements;
 	VkMemoryAllocateInfo alloc_info;
@@ -1530,8 +1558,6 @@ static void vk_create_geometry_buffers( uint32_t size )
 	uint32_t memory_type;
 	void *data;
 	int i;
-
-	// TODO: release existing memory?
 
 	desc.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
 	desc.pNext = NULL;
@@ -2786,6 +2812,7 @@ void vk_initialize( void )
 			fence_desc.flags = VK_FENCE_CREATE_SIGNALED_BIT; // so it can be used to start rendering
 
 			VK_CHECK( qvkCreateFence( vk.device, &fence_desc, NULL, &vk.tess[i].rendering_finished_fence ) );
+			vk.tess[i].waitForFence = qtrue;
 		}
 	}
 
@@ -3035,8 +3062,9 @@ void vk_initialize( void )
 
 	}
 
-	vk.geometry_buffer_size = VERTEX_BUFFER_SIZE;
-	vk_create_geometry_buffers( vk.geometry_buffer_size );
+	vk.geometry_buffer_size_new = VERTEX_BUFFER_SIZE;
+	vk_create_geometry_buffers( vk.geometry_buffer_size_new );
+	vk.geometry_buffer_size_new = 0;
 
 	vk_create_storage_buffer( MAX_FLARES * vk.storage_alignment );
 
@@ -3194,10 +3222,7 @@ void vk_shutdown( void )
 	vk_release_vbo();
 #endif
 
-	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ ) {
-		qvkDestroyBuffer(vk.device, vk.tess[i].vertex_buffer, NULL);
-	}
-	qvkFreeMemory(vk.device, vk.geometry_buffer_memory, NULL);
+	vk_release_geometry_buffers();
 
 	qvkDestroyBuffer( vk.device, vk.storage.buffer, NULL );
 	qvkFreeMemory( vk.device, vk.storage.memory, NULL );
@@ -3257,7 +3282,8 @@ void vk_shutdown( void )
 	qvkDestroySurfaceKHR( vk.instance, vk.surface, NULL );
 
 #ifndef NDEBUG
-	qvkDestroyDebugReportCallbackEXT(vk.instance, vk.debug_callback, NULL);
+	if ( qvkDestroyDebugReportCallbackEXT && vk.debug_callback )
+		qvkDestroyDebugReportCallbackEXT( vk.instance, vk.debug_callback, NULL );
 #endif
 
 	qvkDestroyInstance(vk.instance, NULL);
@@ -4361,7 +4387,8 @@ static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range) {
 	viewport->height = (float)r.extent.height;
 
 	switch ( depth_range ) {
-		case DEPTH_RANGE_NORMAL:
+		default:
+		//case DEPTH_RANGE_NORMAL:
 			viewport->minDepth = 0.0f;
 			viewport->maxDepth = 1.0f;
 			break;
@@ -4382,7 +4409,7 @@ static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range) {
 
 static void get_scissor_rect(VkRect2D *r) {
 
-	if ( backEnd.viewParms.portalView )
+	if ( backEnd.viewParms.portalView != PV_NONE )
 	{
 		r->offset.x = backEnd.viewParms.scissorX;
 		r->offset.y = glConfig.vidHeight - backEnd.viewParms.scissorY - backEnd.viewParms.scissorHeight;
@@ -4443,54 +4470,27 @@ static void get_mvp_transform( float *mvp )
 }
 
 
-void vk_clear_attachments(qboolean clear_depth, qboolean clear_stencil, qboolean clear_color, const vec4_t color) {
+void vk_clear_color( const vec4_t color ) {
 	
-	VkClearAttachment attachments[2], *a;
+	VkClearAttachment attachment;
 	VkClearRect clear_rect[2];
-	uint32_t attachment_count;
-	int rect_count;
+	uint32_t rect_count;
 
-	if (!vk.active)
+	if ( !vk.active )
 		return;
 
-	Com_Memset(&attachments, 0, sizeof(attachments));
-	Com_Memset(&clear_rect, 0, sizeof(clear_rect));
-	attachment_count = 0;
-	a = attachments;
-
-	if (clear_color) {
-		a->aspectMask |= VK_IMAGE_ASPECT_COLOR_BIT;
-		a->colorAttachment = 0;
-		a->clearValue.color.float32[0] = color[0];
-		a->clearValue.color.float32[1] = color[1];
-		a->clearValue.color.float32[2] = color[2];
-		a->clearValue.color.float32[3] = color[3];
-		attachment_count++;
-		a++;
-	}
-
-	if ( clear_depth /*|| clear_stencil*/ ) {
-		//if (clear_depth) {
-		a->aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
-		a->clearValue.depthStencil.depth = 1.0f;
-		a->clearValue.depthStencil.stencil = 0;
-		//}
-		if ( clear_stencil ) {
-			a->aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-		}
-		attachment_count++;
-		a++;
-	}
-
-	if ( attachment_count == 0 ) {
-		return;
-	}
+	attachment.colorAttachment = 0;
+	attachment.clearValue.color.float32[0] = color[0];
+	attachment.clearValue.color.float32[1] = color[1];
+	attachment.clearValue.color.float32[2] = color[2];
+	attachment.clearValue.color.float32[3] = color[3];
+	attachment.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 
 	get_scissor_rect( &clear_rect[0].rect );
 	clear_rect[0].baseArrayLayer = 0;
 	clear_rect[0].layerCount = 1;
 	rect_count = 1;
-#if 1
+#ifdef DEBUG
 	// Split viewport rectangle into two non-overlapping rectangles.
 	// It's a HACK to prevent Vulkan validation layer's performance warning:
 	//		"vkCmdClearAttachments() issued on command buffer object XXX prior to any Draw Cmds.
@@ -4498,7 +4498,7 @@ void vk_clear_attachments(qboolean clear_depth, qboolean clear_stencil, qboolean
 	// 
 	// NOTE: we don't use LOAD_OP_CLEAR for color attachment when we begin renderpass
 	// since at that point we don't know whether we need collor buffer clear (usually we don't).
-	if (clear_color) {
+	{
 		uint32_t h = clear_rect[0].rect.extent.height / 2;
 		clear_rect[0].rect.extent.height = h;
 		clear_rect[1] = clear_rect[0];
@@ -4506,7 +4506,35 @@ void vk_clear_attachments(qboolean clear_depth, qboolean clear_stencil, qboolean
 		rect_count = 2;
 	}
 #endif
-	qvkCmdClearAttachments( vk.cmd->command_buffer, attachment_count, attachments, rect_count, clear_rect );
+	qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &attachment, rect_count, clear_rect );
+}
+
+
+void vk_clear_depth( qboolean clear_stencil ) {
+	
+	VkClearAttachment attachment;
+	VkClearRect clear_rect[1];
+
+	if ( !vk.active )
+		return;
+
+	if ( !vk_world.dirty_depth_attachment )
+		return;
+
+	attachment.colorAttachment = 0;
+	attachment.clearValue.depthStencil.depth = 1.0f;
+	attachment.clearValue.depthStencil.stencil = 0;
+	if ( clear_stencil ) {
+		attachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
+	} else {
+		attachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+	}
+
+	get_scissor_rect( &clear_rect[0].rect );
+	clear_rect[0].baseArrayLayer = 0;
+	clear_rect[0].layerCount = 1;
+
+	qvkCmdClearAttachments( vk.cmd->command_buffer, 1, &attachment, 1, clear_rect );
 }
 
 
@@ -4523,7 +4551,7 @@ void vk_update_mvp( const float *m ) {
 	else
 		get_mvp_transform( push_constants );
 
-	if ( backEnd.viewParms.portalView ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		// Eye space transform.
 		// NOTE: backEnd.or.modelMatrix incorporates s_flipMatrix, so it should be taken into account 
 		// when computing clipping plane too.
@@ -4580,13 +4608,15 @@ static void vk_bind_attr( int index, unsigned int item_size, const void *src ) {
 	const uint32_t offset = PAD( vk.cmd->vertex_buffer_offset, 32 );
 	const uint32_t size = tess.numVertexes * item_size;
 
-	if ( offset + size > VERTEX_BUFFER_SIZE ) {
-		ri.Error( ERR_DROP, "vk_bind_attr: geometry buffer overflow on attr %i", index );
+	if ( offset + size > vk.geometry_buffer_size ) {
+		// schedule geometry buffer resize
+		vk.geometry_buffer_size_new = log2pad( offset + size, 1 );
+	} else {
+		vk.cmd->buf_offset[ index ] = offset;
+		Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
+		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 	}
 
-	vk.cmd->buf_offset[ index ] = offset;
-	Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
-	vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 	vk_bind_index( index );
 }
 
@@ -4595,12 +4625,13 @@ uint32_t vk_tess_index( uint32_t numIndexes, const void *src ) {
 	const uint32_t offset = vk.cmd->vertex_buffer_offset;
 	const uint32_t size = numIndexes * sizeof( tess.indexes[0] );
 
-	if ( offset + size > VERTEX_BUFFER_SIZE ) {
-		ri.Error( ERR_DROP, "vk_tess_index: index buffer overflow" );
+	if ( offset + size > vk.geometry_buffer_size ) {
+		// schedule geometry buffer resize
+		vk.geometry_buffer_size_new = log2pad( offset + size, 1 );
+	} else {
+		Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
+		vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 	}
-
-	Com_Memcpy( vk.cmd->vertex_buffer_ptr + offset, src, size );
-	vk.cmd->vertex_buffer_offset = (VkDeviceSize)offset + size;
 
 	return offset;
 }
@@ -4704,10 +4735,6 @@ void vk_reset_descriptor( int index )
 void vk_update_descriptor( int index, VkDescriptorSet descriptor )
 {
 	if ( vk.cmd->descriptor_set.current[ index ] != descriptor ) {
-		//if ( index > vk.cmd->descriptor_set.end )
-		//	vk.cmd->descriptor_set.end = index;
-		//if ( index < vk.cmd->descriptor_set.start )
-		//	vk.cmd->descriptor_set.start = index;
 		vk.cmd->descriptor_set.start = ( index < vk.cmd->descriptor_set.start ) ? index : vk.cmd->descriptor_set.start;
 		vk.cmd->descriptor_set.end = ( index > vk.cmd->descriptor_set.end ) ? index : vk.cmd->descriptor_set.end;
 	}
@@ -4733,10 +4760,10 @@ void vk_bind_descriptor_sets( void )
 	end = vk.cmd->descriptor_set.end;
 
 	offset_count = 0;
-	if ( start == 0 ) {
+	if ( start == 0 ) { // uniform offset
 		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 0 ];
 	}
-	if ( end >= 4 ) {
+	if ( end >= 4 ) { // storage offset
 		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 1 ];
 	}
 
@@ -4750,10 +4777,14 @@ void vk_bind_descriptor_sets( void )
 
 
 void vk_draw_geometry( uint32_t pipeline, Vk_Depth_Range depth_range, qboolean indexed ) {
-	static Vk_Depth_Range old_range = DEPTH_RANGE_NORMAL;
 	VkPipeline vkpipe;
 	VkRect2D scissor_rect;
 	VkViewport viewport;
+
+	if ( vk.geometry_buffer_size_new ) {
+		// geometry buffer overflow happened this frame
+		return;
+	}
 
 	vk_bind_descriptor_sets();
 
@@ -4762,9 +4793,8 @@ void vk_draw_geometry( uint32_t pipeline, Vk_Depth_Range depth_range, qboolean i
 	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
 
 	// configure pipeline's dynamic state
-	if ( vk.updateViewport || depth_range != old_range ) {
-		vk.updateViewport = qfalse;
-		old_range = depth_range;
+	if ( vk.cmd->depth_range != depth_range ) {
+		vk.cmd->depth_range = depth_range;
 
 		get_scissor_rect( &scissor_rect );
 		qvkCmdSetScissor( vk.cmd->command_buffer, 0, 1, &scissor_rect );
@@ -4873,28 +4903,35 @@ void vk_begin_frame( void )
 	if ( vk.frame_count++ ) // might happen during stereo rendering
 		return;
 
-	if ( !ri.CL_IsMinimized() ) {
-		res = qvkAcquireNextImageKHR( vk.device, vk.swapchain, 1e10, vk.image_acquired, VK_NULL_HANDLE, &vk.swapchain_image_index );
-		// when running via RDP: "Application has already acquired the maximum number of images (0x2)"
-		// probably caused by "device lost" errors
-		if ( res < 0 ) {
-			if ( res == VK_ERROR_OUT_OF_DATE_KHR ) {
-				// swapchain re-creation needed
-				vk_restart_swapchain( __func__ );
-			} else {
-				ri.Error( ERR_FATAL, "vkAcquireNextImageKHR returned error code %x", res );
+	if ( vk.cmd->waitForFence ) {
+		if ( !ri.CL_IsMinimized() ) {
+			res = qvkAcquireNextImageKHR( vk.device, vk.swapchain, 1e10, vk.image_acquired, VK_NULL_HANDLE, &vk.swapchain_image_index );
+			// when running via RDP: "Application has already acquired the maximum number of images (0x2)"
+			// probably caused by "device lost" errors
+			if ( res < 0 ) {
+				if ( res == VK_ERROR_OUT_OF_DATE_KHR ) {
+					// swapchain re-creation needed
+					vk_restart_swapchain( __func__ );
+				} else {
+					ri.Error( ERR_FATAL, "vkAcquireNextImageKHR returned error code %x", res );
+				}
 			}
+		} else {
+			vk.swapchain_image_index++;
+			vk.swapchain_image_index %= vk.swapchain_image_count;
 		}
+
+		// TODO: do not switch with r_swapInterval?
+		vk.cmd = &vk.tess[ vk.cmd_index++ ];
+		vk.cmd_index %= NUM_COMMAND_BUFFERS;
+		
+		vk.cmd->waitForFence = qfalse;
+		VK_CHECK( qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e12 ) );
 	} else {
-		vk.swapchain_image_index++;
-		vk.swapchain_image_index %= vk.swapchain_image_count;
+		// current command buffer has been reset due to geometry buffer overflow/update
+		// so we will reuse it with current swapchain image as well
 	}
 
-	// TODO: do not switch with r_swapInterval?
-	vk.cmd = &vk.tess[ vk.cmd_index++ ];
-	vk.cmd_index %= NUM_COMMAND_BUFFERS;
-
-	VK_CHECK( qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e12 ) );
 	VK_CHECK( qvkResetFences( vk.device, 1, &vk.cmd->rendering_finished_fence ) );
 
 	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -4957,12 +4994,30 @@ void vk_begin_frame( void )
 
 	// other stats
 	vk.stats.push_size = 0;
+}
 
-	if ( r_fastsky->integer ) {
-		backEnd.projection2D = qtrue; // to ensure we have viewport that occupies entire window
-		vk_clear_attachments( qfalse, qfalse, qtrue, colorBlack );
-		backEnd.projection2D = qfalse;
-	}
+
+static void vk_resize_geometry_buffer( void )
+{
+	int i;
+
+	vk_end_render_pass();
+	
+	VK_CHECK( qvkEndCommandBuffer( vk.cmd->command_buffer ) );
+
+	qvkResetCommandBuffer( vk.cmd->command_buffer, 0 );
+
+	vk_wait_idle();
+
+	vk_release_geometry_buffers();
+
+	vk_create_geometry_buffers( vk.geometry_buffer_size_new );
+	vk.geometry_buffer_size_new = 0;
+
+	for ( i = 0; i < NUM_COMMAND_BUFFERS; i++ )
+		vk_update_uniform_descriptor( vk.tess[ i ].uniform_descriptor, vk.tess[ i ].vertex_buffer );
+
+	ri.Printf( PRINT_DEVELOPER, "...geometry buffer resized to %iK\n", (int)( vk.geometry_buffer_size / 1024 ) );
 }
 
 
@@ -4975,6 +5030,14 @@ void vk_end_frame( void )
 
 	if ( vk.frame_count == 0 )
 		return;
+
+	vk.frame_count = 0;
+
+	if ( vk.geometry_buffer_size_new )
+	{
+		vk_resize_geometry_buffer();
+		return;
+	}
 
 	if ( vk.fboActive )
 	{
@@ -5031,8 +5094,10 @@ void vk_end_frame( void )
 	}
 
 	VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, vk.cmd->rendering_finished_fence ) );
+	vk.cmd->waitForFence = qtrue;
 
-	vk.frame_count = 0;
+	// presentation may take undefined time to complete, we can't measure it in a reliable way
+	backEnd.pc.msec = ri.Milliseconds() - backEnd.pc.msec;
 
 	if ( ri.CL_IsMinimized() )
 		return;

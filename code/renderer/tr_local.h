@@ -493,15 +493,21 @@ typedef struct {
 	qboolean	eyeOutside;
 	vec4_t		fogDistanceVector;
 	vec4_t		fogDepthVector;
-	const float *fogColor;
+	const float *fogColor; // vec4_t
 } fogProgramParms_t;
+
+typedef enum {
+	PV_NONE = 0,
+	PV_PORTAL, // this view is through a portal
+	PV_MIRROR, // portal + inverted face culling
+	PV_COUNT
+} portalView_t;
 
 typedef struct {
 	orientationr_t	or;
 	orientationr_t	world;
 	vec3_t		pvsOrigin;			// may be different than or.origin for portals
-	qboolean	isPortal;			// true if this view is through a portal
-	qboolean	isMirror;			// the portal is a mirror, invert the face culling
+	portalView_t portalView;
 	int			frameSceneNum;		// copied from tr.frameSceneNum
 	int			frameCount;			// copied from tr.frameCount
 	cplane_t	portalPlane;		// clip anything behind this if mirroring
@@ -926,7 +932,7 @@ typedef struct {
 	int			currenttmu;
 	qboolean	finishCalled;
 	GLint		texEnv[2];
-	int			faceCulling;
+	cullType_t	faceCulling;
 	unsigned long	glStateBits;
 } glstate_t;
 
@@ -1037,6 +1043,7 @@ typedef struct {
 	image_t					*identityLightImage;	// full of tr.identityLightByte
 
 	shader_t				*defaultShader;
+	shader_t				*cinematicShader;
 	shader_t				*shadowShader;
 	shader_t				*projectionShadowShader;
 
@@ -1293,7 +1300,7 @@ void	GL_TextureMode( const char *string );
 void	GL_CheckErrors( void );
 void	GL_State( unsigned long stateVector );
 void	GL_TexEnv( GLint env );
-void	GL_Cull( int cullType );
+void	GL_Cull( cullType_t cullType );
 
 #define GLS_SRCBLEND_ZERO						0x00000001
 #define GLS_SRCBLEND_ONE						0x00000002
@@ -1325,8 +1332,8 @@ void	GL_Cull( int cullType );
 
 #define GLS_ATEST_GT_0							0x10000000
 #define GLS_ATEST_LT_80							0x20000000
-#define GLS_ATEST_GE_80							0x40000000
-#define GLS_ATEST_BITS							0x70000000
+#define GLS_ATEST_GE_80							0x30000000
+#define GLS_ATEST_BITS							0x30000000
 
 #define GLS_DEFAULT			GLS_DEPTHMASK_TRUE
 
@@ -1412,9 +1419,10 @@ typedef struct shaderCommands_s
 
 	color4ub_t	constantColor255[SHADER_MAX_VERTEXES] QALIGN(16);
 #pragma pack(pop)
-	
+
 	surfaceType_t	surfType;
 	int			vboIndex;
+	qboolean	allowVBO;
 
 	shader_t	*shader;
 	double		shaderTime;	// -EC- set to double for frameloss fix
@@ -1424,7 +1432,6 @@ typedef struct shaderCommands_s
 #endif
 	int			numIndexes;
 	int			numVertexes;
-	qboolean	allowVBO;
 
 #ifdef USE_PMLIGHT
 	const dlight_t* light;
@@ -1704,6 +1711,10 @@ typedef struct {
 
 typedef struct {
 	int		commandId;
+} bindBufferCommand_t;
+
+typedef struct {
+	int		commandId;
 	image_t	*image;
 	int		width;
 	int		height;
@@ -1747,16 +1758,26 @@ typedef struct
 	int commandId;
 } clearDepthCommand_t;
 
+typedef struct
+{
+	int commandId;
+	qboolean fullscreen;
+	qboolean frontAndBack;
+	qboolean colorMask;
+} clearColorCommand_t;
+
 typedef enum {
 	RC_END_OF_LIST,
 	RC_SET_COLOR,
 	RC_STRETCH_PIC,
 	RC_DRAW_SURFS,
+	RC_BIND_BUFFER,
 	RC_DRAW_BUFFER,
 	RC_SWAP_BUFFERS,
 	RC_FINISHBLOOM,
 	RC_COLORMASK,
-	RC_CLEARDEPTH
+	RC_CLEARDEPTH,
+	RC_CLEARCOLOR
 } renderCommand_t;
 
 

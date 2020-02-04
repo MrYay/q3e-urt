@@ -348,7 +348,7 @@ static void DrawNormals( const shaderCommands_t *input ) {
 		}
 		tess.numVertexes = 2 * count;
 		tess.numIndexes = 0;
-		vk_bind_geometry_ext( TESS_IDX | TESS_XYZ );
+		vk_bind_geometry_ext( TESS_XYZ );
 		vk_draw_geometry( vk.normals_debug_pipeline, DEPTH_RANGE_ZERO, qfalse );
 		i += count;
 	}
@@ -1212,7 +1212,7 @@ static void VK_SetLightParams( vkUniform_t *uniform, const dlight_t *dl ) {
 uint32_t VK_PushUniform( const vkUniform_t *uniform ) {
 	const uint32_t offset = vk.cmd->uniform_read_offset = PAD( vk.cmd->vertex_buffer_offset, vk.uniform_alignment );
 	
-	if ( offset + vk.uniform_item_size > VERTEX_BUFFER_SIZE )
+	if ( offset + vk.uniform_item_size > vk.geometry_buffer_size )
 		return ~0U;
 
 	// push uniform
@@ -1263,7 +1263,7 @@ void VK_LightingPass( void )
 		return; // no space left...
 
 	cull = tess.shader->cullType;
-	if ( backEnd.viewParms.portalView ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		if ( backEnd.viewParms.portalView == PV_MIRROR ) {
 			switch ( cull ) {
 				case CT_FRONT_SIDED: cull = CT_BACK_SIDED; break;

@@ -145,7 +145,7 @@ void GL_BindTexture( int unit, GLuint texnum )
 /*
 ** GL_Cull
 */
-void GL_Cull( int cullType ) {
+void GL_Cull( cullType_t cullType ) {
 	if ( glState.faceCulling == cullType ) {
 		return;
 	}
@@ -162,7 +162,7 @@ void GL_Cull( int cullType ) {
 		qglEnable( GL_CULL_FACE );
 
 		cullFront = (cullType == CT_FRONT_SIDED);
-		if ( backEnd.viewParms.isMirror )
+		if ( backEnd.viewParms.portalView == PV_MIRROR )
 		{
 			cullFront = !cullFront;
 		}
@@ -440,9 +440,7 @@ static void RB_BeginDrawingView( void ) {
 	if ( r_finish->integer == 1 && !glState.finishCalled ) {
 		qglFinish();
 		glState.finishCalled = qtrue;
-	}
-
-	if ( r_finish->integer == 0 ) {
+	} else if ( r_finish->integer == 0 ) {
 		glState.finishCalled = qtrue;
 	}
 
@@ -491,7 +489,7 @@ static void RB_BeginDrawingView( void ) {
 	backEnd.skyRenderedThisView = qfalse;
 
 	// clip to the plane of the portal
-	if ( backEnd.viewParms.isPortal ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		float	plane[4];
 		GLdouble plane2[4];
 
@@ -720,6 +718,9 @@ static void RB_BeginDrawingLitSurfs( void )
 	// 2D images again
 	backEnd.projection2D = qfalse;
 
+	// we will only draw a sun if there was sky rendered in this view
+	backEnd.skyRenderedThisView = qfalse;
+
 	//
 	// set the modelview matrix for the viewer
 	//
@@ -727,11 +728,8 @@ static void RB_BeginDrawingLitSurfs( void )
 
 	glState.faceCulling = -1;		// force face culling to set next time
 
-	// we will only draw a sun if there was sky rendered in this view
-	backEnd.skyRenderedThisView = qfalse;
-
 	// clip to the plane of the portal
-	if ( backEnd.viewParms.isPortal ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		float	plane[4];
 		GLdouble plane2[4];
 
@@ -740,10 +738,10 @@ static void RB_BeginDrawingLitSurfs( void )
 		plane[2] = backEnd.viewParms.portalPlane.normal[2];
 		plane[3] = backEnd.viewParms.portalPlane.dist;
 
-		plane2[0] = DotProduct (backEnd.viewParms.or.axis[0], plane);
-		plane2[1] = DotProduct (backEnd.viewParms.or.axis[1], plane);
-		plane2[2] = DotProduct (backEnd.viewParms.or.axis[2], plane);
-		plane2[3] = DotProduct (plane, backEnd.viewParms.or.origin) - plane[3];
+		plane2[0] = DotProduct( backEnd.viewParms.or.axis[0], plane );
+		plane2[1] = DotProduct( backEnd.viewParms.or.axis[1], plane );
+		plane2[2] = DotProduct( backEnd.viewParms.or.axis[2], plane );
+		plane2[3] = DotProduct( plane, backEnd.viewParms.or.origin ) - plane[3];
 
 		qglLoadMatrixf( s_flipMatrix );
 		qglClipPlane( GL_CLIP_PLANE0, plane2 );
@@ -979,18 +977,6 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 	if ( !tr.registered ) {
 		return;
 	}
-	R_IssuePendingRenderCommands();
-
-	if ( tess.numIndexes ) {
-		RB_EndSurface();
-		VBO_UnBind();
-	}
-
-	if ( backEnd.doneSurfaces ) {
-		// make sure that we rendered some surfaces before
-		// otherwise some (Intel GMA) drivers may stuck between two consecutive glFinish calls
-		qglFinish();
-	}
 
 	start = 0;
 	if ( r_speeds->integer ) {
@@ -1013,26 +999,15 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 		ri.Printf( PRINT_ALL, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
-	RB_SetGL2D();
-
-	qglColor3f( tr.identityLight, tr.identityLight, tr.identityLight );
-
-	qglBegin (GL_QUADS);
-	qglTexCoord2f ( 0.5f / cols,  0.5f / rows );
-	qglVertex2f (x, y);
-	qglTexCoord2f ( ( cols - 0.5f ) / cols ,  0.5f / rows );
-	qglVertex2f (x+w, y);
-	qglTexCoord2f ( ( cols - 0.5f ) / cols, ( rows - 0.5f ) / rows );
-	qglVertex2f (x+w, y+h);
-	qglTexCoord2f ( 0.5f / cols, ( rows - 0.5f ) / rows );
-	qglVertex2f (x, y+h);
-	qglEnd ();
+	tr.cinematicShader->stages[0]->bundle[0].image[0] = tr.scratchImage[client];
+	RE_StretchPic( x, y, w, h, 0.5f / cols, 0.5f / rows, 1.0f - 0.5f / cols, 1.0f - 0.5 / rows, tr.cinematicShader->index );
 }
 
 
 void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty ) {
 
 	image_t *image = tr.scratchImage[ client ];
+
 	GL_Bind( image );
 
 	// if the scratchImage isn't in the format we want, specify it as a new texture
@@ -1044,12 +1019,10 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );	
-	} else {
-		if (dirty) {
-			// otherwise, just subimage upload it so that drivers can tell we are going to be changing
-			// it and don't try and do a texture compression
-			qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
-		}
+	} else if ( dirty ) {
+		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
+		// it and don't try and do a texture compression
+		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
 	}
 }
 
@@ -1089,14 +1062,13 @@ static const void *RB_StretchPic( const void *data ) {
 	if ( shader != tess.shader ) {
 		if ( tess.numIndexes ) {
 			RB_EndSurface();
-			//VBO_UnBind();
 		}
 		backEnd.currentEntity = &backEnd.entity2D;
 		RB_BeginSurface( shader, 0 );
 	}
 
 	VBO_UnBind();
-	
+
 	if ( !backEnd.projection2D ) {
 		RB_SetGL2D();
 	}
@@ -1185,6 +1157,59 @@ static void RB_LightingPass( void )
 
 
 /*
+================
+RB_DebugPolygon
+================
+*/
+static void RB_DebugPolygon( int color, int numPoints, float *points ) {
+
+	int		i;
+
+	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+
+	// draw solid shade
+
+	qglColor3f( color&1, (color>>1)&1, (color>>2)&1 );
+	qglBegin( GL_POLYGON );
+	for ( i = 0 ; i < numPoints ; i++ ) {
+		qglVertex3fv( points + i * 3 );
+	}
+	qglEnd();
+
+	// draw wireframe outline
+	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	qglDepthRange( 0, 0 );
+	qglColor3f( 1, 1, 1 );
+	qglBegin( GL_POLYGON );
+	for ( i = 0 ; i < numPoints ; i++ ) {
+		qglVertex3fv( points + i * 3 );
+	}
+	qglEnd();
+	qglDepthRange( 0, 1 );
+}
+
+
+/*
+====================
+RB_DebugGraphics
+
+Visualization aid for movement clipping debugging
+====================
+*/
+static void RB_DebugGraphics( void ) {
+
+	if ( !r_debugSurface->integer ) {
+		return;
+	}
+
+	GL_Bind( tr.whiteImage );
+	GL_Cull( CT_FRONT_SIDED );
+
+	ri.CM_DrawDebugSurface( RB_DebugPolygon );
+}
+
+
+/*
 =============
 RB_DrawSurfs
 =============
@@ -1193,9 +1218,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 	const drawSurfsCommand_t	*cmd;
 
 	// finish any 2D drawing if needed
-	if ( tess.numIndexes ) {
-		RB_EndSurface();
-	}
+	RB_EndSurface();
 
 	cmd = (const drawSurfsCommand_t *)data;
 
@@ -1234,8 +1257,27 @@ static const void *RB_DrawSurfs( const void *data ) {
 		}
 	}
 
+	// draw main system development information (surface outlines, etc)
+	RB_DebugGraphics();
+
 	//TODO Maybe check for rdf_noworld stuff but q3mme has full 3d ui
 	backEnd.doneSurfaces = qtrue; // for bloom
+
+	return (const void *)(cmd + 1);
+}
+
+
+/*
+=============
+RB_BindBuffer
+=============
+*/
+static const void *RB_BindBuffer( const void *data ) {
+	const bindBufferCommand_t	*cmd;
+
+	cmd = (const bindBufferCommand_t *)data;
+
+	FBO_BindMain();
 
 	return (const void *)(cmd + 1);
 }
@@ -1334,7 +1376,7 @@ RB_ColorMask
 static const void *RB_ColorMask( const void *data )
 {
 	const colorMaskCommand_t *cmd = data;
-	
+
 	qglColorMask( cmd->rgba[0], cmd->rgba[1], cmd->rgba[2], cmd->rgba[3] );
 	
 	return (const void *)(cmd + 1);
@@ -1350,8 +1392,7 @@ static const void *RB_ClearDepth( const void *data )
 {
 	const clearDepthCommand_t *cmd = data;
 	
-	if ( tess.numIndexes )
-		RB_EndSurface();
+	RB_EndSurface();
 
 	// texture swapping test
 	if ( r_showImages->integer )
@@ -1359,6 +1400,41 @@ static const void *RB_ClearDepth( const void *data )
 
 	qglClear( GL_DEPTH_BUFFER_BIT );
 	
+	return (const void *)(cmd + 1);
+}
+
+
+/*
+=============
+RB_ClearColor
+=============
+*/
+static const void *RB_ClearColor( const void *data )
+{
+	const clearColorCommand_t *cmd = data;
+
+	if ( cmd->fullscreen )
+	{
+		qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+		qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
+	}
+
+	if ( cmd->colorMask )
+	{
+		qglColorMask( GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE );
+	}
+
+	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
+
+	if ( cmd->frontAndBack )
+	{
+		qglDrawBuffer( GL_FRONT );
+		qglClear( GL_COLOR_BUFFER_BIT );
+		qglDrawBuffer( GL_BACK );
+	}
+
+	qglClear( GL_COLOR_BUFFER_BIT );
+
 	return (const void *)(cmd + 1);
 }
 
@@ -1425,6 +1501,9 @@ static const void *RB_SwapBuffers( const void *data ) {
 		FBO_PostProcess();
 	}
 
+	// buffer swap may take undefined time to complete, we can't measure it in a reliable way
+	backEnd.pc.msec = ri.Milliseconds() - backEnd.pc.msec;
+
 	if ( backEnd.screenshotMask && tr.frameCount > 1 ) {
 
 		if ( superSampled ) {
@@ -1461,10 +1540,14 @@ static const void *RB_SwapBuffers( const void *data ) {
 
 	ri.GLimp_EndFrame();
 
+	FBO_BindMain();
+
 	backEnd.projection2D = qfalse;
 	backEnd.doneBloom = qfalse;
 	backEnd.doneSurfaces = qfalse;
 	backEnd.drawConsole = qfalse;
+
+	r_anaglyphMode->modified = qfalse;
 
 	return (const void *)(cmd + 1);
 }
@@ -1476,9 +1559,8 @@ RB_ExecuteRenderCommands
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
-	int		t1, t2;
 
-	t1 = ri.Milliseconds ();
+	backEnd.pc.msec = ri.Milliseconds();
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));
@@ -1492,6 +1574,9 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );
+			break;
+		case RC_BIND_BUFFER:
+			data = RB_BindBuffer( data );
 			break;
 		case RC_DRAW_BUFFER:
 			data = RB_DrawBuffer( data );
@@ -1508,11 +1593,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_CLEARDEPTH:
 			data = RB_ClearDepth(data);
 			break;
+		case RC_CLEARCOLOR:
+			data = RB_ClearColor(data);
+			break;
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering
-			t2 = ri.Milliseconds();
-			backEnd.pc.msec = t2 - t1;
 			return;
 		}
 	}

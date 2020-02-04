@@ -35,12 +35,6 @@ static const float s_flipMatrix[16] = {
 };
 #endif
 
-#ifdef _DEBUG
-static float fast_sky_color[4] = { 0.8f, 0.7f, 0.4f, 1.0f };
-#else
-static float fast_sky_color[4] = { 0.0f, 0.0f, 0.0f, 1.0f };
-#endif
-
 /*
 ** GL_Bind
 */
@@ -376,11 +370,11 @@ static void RB_Hyperspace( void ) {
 
 #ifdef USE_VULKAN
 	{
-		float color[4];
+		vec4_t color;
 		c = ( backEnd.refdef.time & 255 ) / 255.0f;
 		color[0] = color[1] = color[2] = c;
 		color[3] = 1.0;
-		vk_clear_attachments(qfalse, qfalse, qtrue, color);
+		vk_clear_color( color );
 	}
 #else
 	c = ( backEnd.refdef.time & 255 ) / 255.0f;
@@ -396,7 +390,8 @@ static void SetViewportAndScissor( void ) {
 #ifdef USE_VULKAN
 	//Com_Memcpy( vk_world.modelview_transform, backEnd.or.modelMatrix, 64 );
 	//vk_update_mvp();
-	vk.updateViewport = qtrue;
+	// force depth range and viewport/scissor updates
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 #else
 	qglMatrixMode(GL_PROJECTION);
 	qglLoadMatrixf( backEnd.viewParms.projectionMatrix );
@@ -427,9 +422,7 @@ static void RB_BeginDrawingView( void ) {
 	if ( r_finish->integer == 1 && !glState.finishCalled ) {
 		qglFinish();
 		glState.finishCalled = qtrue;
-	}
-
-	if ( r_finish->integer == 0 ) {
+	} else if ( r_finish->integer == 0 ) {
 		glState.finishCalled = qtrue;
 	}
 #endif
@@ -444,7 +437,7 @@ static void RB_BeginDrawingView( void ) {
 	SetViewportAndScissor();
 
 #ifdef USE_VULKAN
-	vk_clear_attachments(vk_world.dirty_depth_attachment, qtrue, qfalse, fast_sky_color);
+	vk_clear_depth( qtrue );
 #else
 	// ensures that depth writes are enabled for the depth clear
 	GL_State( GLS_DEFAULT );
@@ -983,17 +976,16 @@ RENDER BACK END FUNCTIONS
 /*
 ================
 RB_SetGL2D
-
 ================
 */
-void RB_SetGL2D( void ) {
+static void RB_SetGL2D( void ) {
 	backEnd.projection2D = qtrue;
 
 #ifdef USE_VULKAN
-	if ( vk.frame_count )
-		vk_update_mvp( NULL );
+	vk_update_mvp( NULL );
 
-	vk.updateViewport = qtrue;
+	// force depth range and viewport/scissor updates
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 #else
 	// set 2D virtual screen size
 	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
@@ -1009,7 +1001,6 @@ void RB_SetGL2D( void ) {
 		GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA );
 
 	GL_Cull( CT_TWO_SIDED );
-
 	qglDisable( GL_CLIP_PLANE0 );
 #endif
 
@@ -1035,20 +1026,6 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 	if ( !tr.registered ) {
 		return;
 	}
-	R_IssuePendingRenderCommands();
-
-	if ( tess.numIndexes ) {
-		RB_EndSurface();
-		//VBO_UnBind();
-	}
-
-#ifndef USE_VULKAN
-	if ( backEnd.doneSurfaces ) {
-		// make sure that we rendered some surfaces before
-		// otherwise some (Intel GMA) drivers may stuck between two consecutive glFinish calls
-		qglFinish();
-	}
-#endif
 
 	start = 0;
 	if ( r_speeds->integer ) {
@@ -1071,30 +1048,15 @@ void RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, const byte *
 		ri.Printf( PRINT_ALL, "qglTexSubImage2D %i, %i: %i msec\n", cols, rows, end - start );
 	}
 
-	RB_SetGL2D();
-#ifdef USE_VULKAN
 	tr.cinematicShader->stages[0]->bundle[0].image[0] = tr.scratchImage[client];
-	RE_StretchPic(x, y, w, h, 0.5f / cols, 0.5f / rows, 1.0f - 0.5f / cols, 1.0f - 0.5 / rows, tr.cinematicShader->index);
-#else
-	qglColor3f( tr.identityLight, tr.identityLight, tr.identityLight );
-
-	qglBegin (GL_QUADS);
-	qglTexCoord2f ( 0.5f / cols,  0.5f / rows );
-	qglVertex2f (x, y);
-	qglTexCoord2f ( ( cols - 0.5f ) / cols ,  0.5f / rows );
-	qglVertex2f (x+w, y);
-	qglTexCoord2f ( ( cols - 0.5f ) / cols, ( rows - 0.5f ) / rows );
-	qglVertex2f (x+w, y+h);
-	qglTexCoord2f ( 0.5f / cols, ( rows - 0.5f ) / rows );
-	qglVertex2f (x, y+h);
-	qglEnd ();
-#endif
+	RE_StretchPic( x, y, w, h, 0.5f / cols, 0.5f / rows, 1.0f - 0.5f / cols, 1.0f - 0.5 / rows, tr.cinematicShader->index );
 }
 
 
 void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty ) {
 
 	image_t *image = tr.scratchImage[ client ];
+
 	GL_Bind( image );
 
 	// if the scratchImage isn't in the format we want, specify it as a new texture
@@ -1113,16 +1075,14 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );	
 #endif
-	} else {
-		if (dirty) {
-			// otherwise, just subimage upload it so that drivers can tell we are going to be changing
-			// it and don't try and do a texture compression
+	} else if ( dirty ) {
+		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
+		// it and don't try and do a texture compression
 #ifdef USE_VULKAN
-			vk_upload_image_data( image->handle, 0, 0, cols, rows, qfalse, data, 4 );
+		vk_upload_image_data( image->handle, 0, 0, cols, rows, qfalse, data, 4 );
 #else
-			qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
+		qglTexSubImage2D( GL_TEXTURE_2D, 0, 0, 0, cols, rows, GL_RGBA, GL_UNSIGNED_BYTE, data );
 #endif
-		}
 	}
 }
 
@@ -1256,6 +1216,137 @@ static void RB_LightingPass( qboolean skipWeapon )
 #endif
 
 
+#ifdef USE_VULKAN
+static void transform_to_eye_space( const vec3_t v, vec3_t v_eye )
+{
+	const float *m = vk_world.modelview_transform;
+	v_eye[0] = m[0]*v[0] + m[4]*v[1] + m[8 ]*v[2] + m[12];
+	v_eye[1] = m[1]*v[0] + m[5]*v[1] + m[9 ]*v[2] + m[13];
+	v_eye[2] = m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14];
+};
+#endif
+
+
+/*
+================
+RB_DebugPolygon
+================
+*/
+void RB_DebugPolygon( int color, int numPoints, float *points ) {
+#ifdef USE_VULKAN
+	vec3_t pa;
+	vec3_t pb;
+	vec3_t p;
+	vec3_t q;
+	vec3_t n;
+	int i;
+
+	if ( numPoints < 3 )
+		return;
+
+	transform_to_eye_space( &points[0], pa );
+	transform_to_eye_space( &points[3], pb );
+	VectorSubtract( pb, pa, p );
+
+	for ( i = 2; i < numPoints; i++ ) {
+		transform_to_eye_space( &points[3*i], pb );
+		VectorSubtract( pb, pa, q );
+		CrossProduct( q, p, n );
+		if ( VectorLength( n ) > 1e-5 ) {
+			break;
+		}
+	}
+
+	if ( DotProduct(n, pa) >= 0 ) {
+		return; // discard backfacing polygon
+	}
+
+	// Solid shade.
+	for (i = 0; i < numPoints; i++) {
+		VectorCopy(&points[3*i], tess.xyz[i]);
+
+		tess.svars.colors[i][0] = (color&1) ? 255 : 0;
+		tess.svars.colors[i][1] = (color&2) ? 255 : 0;
+		tess.svars.colors[i][2] = (color&4) ? 255 : 0;
+		tess.svars.colors[i][3] = 255;
+	}
+	tess.numVertexes = numPoints;
+
+	tess.numIndexes = 0;
+	for (i = 1; i < numPoints - 1; i++) {
+		tess.indexes[tess.numIndexes + 0] = 0;
+		tess.indexes[tess.numIndexes + 1] = i;
+		tess.indexes[tess.numIndexes + 2] = i + 1;
+		tess.numIndexes += 3;
+	}
+
+	vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA | TESS_ST0 );
+	vk_draw_geometry( vk.surface_debug_pipeline_solid, DEPTH_RANGE_NORMAL, qtrue );
+
+	// Outline.
+	Com_Memset( tess.svars.colors, tr.identityLightByte, numPoints * 2 * sizeof(tess.svars.colors[0] ) );
+
+	for ( i = 0; i < numPoints; i++ ) {
+		VectorCopy( &points[3*i], tess.xyz[2*i] );
+		VectorCopy( &points[3*((i + 1) % numPoints)], tess.xyz[2*i + 1] );
+	}
+	tess.numVertexes = numPoints * 2;
+	tess.numIndexes = 0;
+
+	vk_bind_geometry_ext( TESS_XYZ | TESS_RGBA );
+	vk_draw_geometry( vk.surface_debug_pipeline_outline, DEPTH_RANGE_ZERO, qfalse );
+	tess.numVertexes = 0;
+#else
+	int		i;
+
+	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+
+	// draw solid shade
+
+	qglColor3f( color&1, (color>>1)&1, (color>>2)&1 );
+	qglBegin( GL_POLYGON );
+	for ( i = 0 ; i < numPoints ; i++ ) {
+		qglVertex3fv( points + i * 3 );
+	}
+	qglEnd();
+
+	// draw wireframe outline
+	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	qglDepthRange( 0, 0 );
+	qglColor3f( 1, 1, 1 );
+	qglBegin( GL_POLYGON );
+	for ( i = 0 ; i < numPoints ; i++ ) {
+		qglVertex3fv( points + i * 3 );
+	}
+	qglEnd();
+	qglDepthRange( 0, 1 );
+#endif
+}
+
+
+/*
+====================
+RB_DebugGraphics
+
+Visualization aid for movement clipping debugging
+====================
+*/
+static void RB_DebugGraphics( void ) {
+
+	if ( !r_debugSurface->integer ) {
+		return;
+	}
+
+	GL_Bind( tr.whiteImage );
+#ifdef USE_VULKAN
+	vk_update_mvp( NULL );
+#else
+	GL_Cull( CT_FRONT_SIDED );
+#endif
+	ri.CM_DrawDebugSurface( RB_DebugPolygon );
+}
+
+
 /*
 =============
 RB_DrawSurfs
@@ -1266,9 +1357,7 @@ static const void *RB_DrawSurfs( const void *data ) {
 	qboolean skipWeapon;
 
 	// finish any 2D drawing if needed
-	if ( tess.numIndexes ) {
-		RB_EndSurface();
-	}
+	RB_EndSurface();
 
 	cmd = (const drawSurfsCommand_t *)data;
 
@@ -1321,6 +1410,9 @@ __redraw:
 		goto __redraw;
 	}
 
+	// draw main system development information (surface outlines, etc)
+	RB_DebugGraphics();
+
 	//TODO Maybe check for rdf_noworld stuff but q3mme has full 3d ui
 	backEnd.doneSurfaces = qtrue; // for bloom
 
@@ -1342,13 +1434,14 @@ static const void *RB_DrawBuffer( const void *data ) {
 	vk_begin_frame();
 
 	tess.depthRange = DEPTH_RANGE_NORMAL;
-	vk.updateViewport = qtrue;
+
+	// force depth range and viewport/scissor updates
+	vk.cmd->depth_range = DEPTH_RANGE_COUNT;
 
 	if ( r_clear->integer ) {
-		//const float color[4] = {1, 0, 0.5, 1};
-		const float color[4] = {0, 0, 0, 1};
+		const vec4_t color = {1, 0, 0.5, 1};
 		backEnd.projection2D = qtrue; // to ensure we have viewport that occupies entire window
-		vk_clear_attachments( qfalse, qfalse, qtrue, color );
+		vk_clear_color( color );
 		backEnd.projection2D = qfalse;
 	}
 #else
@@ -1384,7 +1477,7 @@ void RB_ShowImages( void )
 		RB_SetGL2D();
 	}
 
-	vk_clear_attachments(qfalse, qfalse, qtrue, colorBlack);
+	vk_clear_color( colorBlack );
 
 	for (i = 0 ; i < tr.numImages ; i++) {
 		image_t *image = tr.images[i];
@@ -1519,15 +1612,14 @@ static const void *RB_ClearDepth( const void *data )
 {
 	const clearDepthCommand_t *cmd = data;
 	
-	if ( tess.numIndexes )
-		RB_EndSurface();
+	RB_EndSurface();
 
 	// texture swapping test
 	//if ( r_showImages->integer )
 	//	RB_ShowImages();
 
 #ifdef USE_VULKAN
-	vk_clear_attachments(qtrue, r_shadows->integer == 2 ? qtrue: qfalse, qfalse, colorBlack);
+	vk_clear_depth( r_shadows->integer == 2 ? qtrue : qfalse );
 #else
 	qglClear( GL_DEPTH_BUFFER_BIT );
 #endif
@@ -1545,19 +1637,19 @@ static const void *RB_ClearColor( const void *data )
 {
 	const clearColorCommand_t *cmd = data;
 
-	if ( tess.numIndexes )
-		RB_EndSurface();
+
 
 #ifdef USE_VULKAN
-	RB_SetGL2D();
-	vk_clear_attachments(qtrue, qfalse, qtrue, colorBlack);
+	backEnd.projection2D = qtrue;
+	vk_clear_color( colorBlack );
+	backEnd.projection2D = qfalse;
 #else
 	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	qglClearColor( 0.0f, 0.0f, 0.0f, 1.0f );
 	qglClear( GL_COLOR_BUFFER_BIT );
 #endif
-	
+
 	return (const void *)(cmd + 1);
 }
 
@@ -1603,7 +1695,11 @@ static const void *RB_SwapBuffers( const void *data ) {
 	}
 #endif
 
+#ifdef USE_VULKAN
+	if ( backEnd.screenshotMask && vk.cmd->waitForFence ) {
+#else
 	if ( backEnd.screenshotMask && tr.frameCount > 1 ) {
+#endif
 		if ( backEnd.screenshotMask & SCREENSHOT_TGA && backEnd.screenshotTGA[0] ) {
 			RB_TakeScreenshot( 0, 0, glConfig.vidWidth, glConfig.vidHeight, backEnd.screenshotTGA );
 			if ( !backEnd.screenShotTGAsilent ) {
@@ -1650,9 +1746,8 @@ RB_ExecuteRenderCommands
 ====================
 */
 void RB_ExecuteRenderCommands( const void *data ) {
-	int		t1, t2;
 
-	t1 = ri.Milliseconds ();
+	backEnd.pc.msec = ri.Milliseconds();
 
 	while ( 1 ) {
 		data = PADP(data, sizeof(void *));
@@ -1688,12 +1783,12 @@ void RB_ExecuteRenderCommands( const void *data ) {
 		case RC_END_OF_LIST:
 		default:
 			// stop rendering
-			t2 = ri.Milliseconds();
-			backEnd.pc.msec = t2 - t1;
 #ifdef USE_VULKAN
 //			if (com_errorEntered && (begin_frame_called && !end_frame_called)) {
 //				vk_end_frame();
 //			}
+#else
+			backEnd.pc.msec = ri.Milliseconds() - backEnd.pc.msec;
 #endif
 			return;
 		}

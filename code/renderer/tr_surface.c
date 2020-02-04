@@ -179,7 +179,8 @@ static void RB_SurfaceSprite( void ) {
 		VectorScale( backEnd.viewParms.or.axis[2], c * radius, up );
 		VectorMA( up, s * radius, backEnd.viewParms.or.axis[1], up );
 	}
-	if ( backEnd.viewParms.isMirror ) {
+
+	if ( backEnd.viewParms.portalView == PV_MIRROR ) {
 		VectorSubtract( vec3_origin, left, left );
 	}
 
@@ -246,7 +247,7 @@ static void RB_SurfaceTriangles( srfTriangles_t *srf ) {
 	if ( tess.allowVBO && srf->vboItemIndex ) {
 #endif
 		// transition to vbo render list
-		if ( !tess.vboIndex ) {
+		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
 			RB_BeginSurface( tess.shader, tess.fogNum );
 			// set some dummy parameters for RB_EndSurface
@@ -790,7 +791,7 @@ static void RB_SurfaceFace( const srfSurfaceFace_t *surf ) {
 	if ( tess.allowVBO && surf->vboItemIndex ) {
 #endif
 		// transition to vbo render list
-		if ( !tess.vboIndex ) {
+		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
 			RB_BeginSurface( tess.shader, tess.fogNum );
 			// set some dummy parameters for RB_EndSurface
@@ -984,7 +985,7 @@ static void RB_SurfaceGrid( srfGridMesh_t *cv ) {
 	if ( tess.allowVBO && cv->vboItemIndex ) {
 #endif
 		// transition to vbo render list
-		if ( !tess.vboIndex ) {
+		if ( tess.vboIndex == 0 ) {
 			RB_EndSurface();
 			RB_BeginSurface( tess.shader, tess.fogNum );
 			// set some dummy parameters for RB_EndSurface

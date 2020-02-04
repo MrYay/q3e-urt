@@ -566,7 +566,7 @@ static void InitOpenGL( void )
 
 		if ( glConfig.numTextureUnits && max_bind_units > 0 )
 			glConfig.numTextureUnits = max_bind_units;
-		
+
 		captureWidth = glConfig.vidWidth;
 		captureHeight = glConfig.vidHeight;
 
@@ -1118,7 +1118,7 @@ const void *RB_TakeVideoFrameCmd( const void *data )
 	avipadlen = avipadwidth - linelen;
 
 	cBuf = PADP(cmd->captureBuffer, packAlign);
-		
+	
 	qglReadPixels(0, 0, cmd->width, cmd->height, GL_RGB,
 		GL_UNSIGNED_BYTE, cBuf);
 
@@ -1437,7 +1437,7 @@ static void R_Register( void )
 	r_mapGreyScale = ri.Cvar_Get( "r_mapGreyScale", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_mapGreyScale, "-1", "1", CV_FLOAT );
 
-	r_subdivisions = ri.Cvar_Get ("r_subdivisions", "4", CVAR_ARCHIVE_ND | CVAR_LATCH );
+	r_subdivisions = ri.Cvar_Get( "r_subdivisions", "4", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	r_ignoreFastPath = ri.Cvar_Get( "r_ignoreFastPath", "1", CVAR_ARCHIVE_ND | CVAR_LATCH );
 
 	r_maxpolys = ri.Cvar_Get( "r_maxpolys", XSTRING( MAX_POLYS ), CVAR_LATCH );
@@ -1503,8 +1503,10 @@ static void R_Register( void )
 	r_dlightBacks = ri.Cvar_Get( "r_dlightBacks", "1", CVAR_ARCHIVE_ND );
 	r_finish = ri.Cvar_Get( "r_finish", "0", CVAR_ARCHIVE_ND );
 	r_textureMode = ri.Cvar_Get( "r_textureMode", "GL_LINEAR_MIPMAP_NEAREST", CVAR_ARCHIVE );
+	ri.Cvar_SetGroup( r_textureMode, CVG_RENDERER );
 	r_gamma = ri.Cvar_Get( "r_gamma", "1", CVAR_ARCHIVE_ND );
 	ri.Cvar_CheckRange( r_gamma, "0.5", "3", CV_FLOAT );
+	ri.Cvar_SetGroup( r_gamma, CVG_RENDERER );
 	r_facePlaneCull = ri.Cvar_Get ("r_facePlaneCull", "1", CVAR_ARCHIVE_ND );
 
 	r_railWidth = ri.Cvar_Get( "r_railWidth", "16", CVAR_ARCHIVE_ND );
@@ -1537,9 +1539,10 @@ static void R_Register( void )
 	r_lightmap = ri.Cvar_Get ("r_lightmap", "0", 0 );
 	r_portalOnly = ri.Cvar_Get ("r_portalOnly", "0", CVAR_CHEAT );
 
-	r_flareSize = ri.Cvar_Get ("r_flareSize", "40", CVAR_CHEAT);
-	r_flareFade = ri.Cvar_Get ("r_flareFade", "7", CVAR_CHEAT);
-	r_flareCoeff = ri.Cvar_Get ("r_flareCoeff", FLARE_STDCOEFF, CVAR_CHEAT);
+	r_flareSize = ri.Cvar_Get( "r_flareSize", "40", CVAR_CHEAT );
+	r_flareFade = ri.Cvar_Get( "r_flareFade", "10", CVAR_CHEAT );
+	r_flareCoeff = ri.Cvar_Get( "r_flareCoeff", "150", CVAR_CHEAT );
+	ri.Cvar_CheckRange( r_flareCoeff, "0.1", NULL, CV_FLOAT );
 
 	r_skipBackEnd = ri.Cvar_Get ("r_skipBackEnd", "0", CVAR_CHEAT);
 
@@ -1599,7 +1602,7 @@ static void R_Register( void )
 	r_renderHeight = ri.Cvar_Get( "r_renderHeight", "600", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderWidth, "96", NULL, CV_INTEGER );
 	ri.Cvar_CheckRange( r_renderHeight, "72", NULL, CV_INTEGER );
-	
+
 	r_renderScale = ri.Cvar_Get( "r_renderScale", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	ri.Cvar_CheckRange( r_renderScale, "0", "4", CV_INTEGER );
 	ri.Cvar_SetDescription( r_renderScale, "Scaling mode to be used with custom render resolution:\n"
@@ -1720,7 +1723,7 @@ static void RE_Shutdown( int destroyWindow ) {
 	ri.Cmd_RemoveCommand( "shaderstate" );
 
 	if ( tr.registered ) {
-		R_IssuePendingRenderCommands();
+		//R_IssuePendingRenderCommands();
 		R_DeleteTextures();
 	}
 
@@ -1749,15 +1752,15 @@ static void RE_Shutdown( int destroyWindow ) {
 =============
 RE_EndRegistration
 
-Touch all images to make sure they are resident
+Touch all images to make sure they are resident (probably obsolete on modern systems)
 =============
 */
 static void RE_EndRegistration( void ) {
-	FBO_BindMain(); // otherwise we may draw images to the back buffer
-	R_IssuePendingRenderCommands();
-	if ( !ri.Sys_LowPhysicalMemory() ) {
-		RB_ShowImages();
-	}
+	//FBO_BindMain(); // otherwise we may draw images to the back buffer
+	//R_IssuePendingRenderCommands();
+	//if ( !ri.Sys_LowPhysicalMemory() ) {
+	//	RB_ShowImages();
+	//}
 }
 
 
@@ -1831,7 +1834,6 @@ refexport_t *GetRefAPI ( int apiVersion, refimport_t *rimp ) {
 	re.FinishBloom = RE_FinishBloom;
 	re.CanMinimize = RE_CanMinimize;
 	re.GetConfig = RE_GetConfig;
-
 	re.VertexLighting = RE_VertexLighting;
 	re.SyncRender = RE_SyncRender;
 

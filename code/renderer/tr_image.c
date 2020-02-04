@@ -945,8 +945,8 @@ image_t	*R_FindImageFile( const char *name, imgFlags_t flags )
 	//
 	// see if the image is already loaded
 	//
-	for (image=hashTable[hash]; image; image=image->next) {
-		if ( !strcmp( name, image->imgName ) ) {
+	for ( image = hashTable[hash]; image; image = image->next ) {
+		if ( !Q_stricmp( name, image->imgName ) ) {
 			// the white image can be used with any set of parms, but other mismatches are errors
 			if ( strcmp( name, "*white" ) ) {
 				if ( image->flags != flags ) {
@@ -1318,7 +1318,7 @@ void R_SetColorMappings( void ) {
 
 	shift = tr.overbrightBits;
 
-	for ( i = 0; i < 256; i++ ) {
+	for ( i = 0; i < ARRAY_LEN( s_gammatable ); i++ ) {
 		if ( g == 1.0f ) {
 			inf = i;
 		} else {
@@ -1334,9 +1334,9 @@ void R_SetColorMappings( void ) {
 		s_gammatable[i] = inf;
 	}
 
-	for (i=0 ; i<256 ; i++) {
+	for ( i = 0; i < ARRAY_LEN( s_intensitytable ); i++ ) {
 		j = i * r_intensity->value;
-		if (j > 255) {
+		if ( j > 255 ) {
 			j = 255;
 		}
 		s_intensitytable[i] = j;
@@ -1354,8 +1354,10 @@ void R_SetColorMappings( void ) {
 R_InitImages
 ===============
 */
-void	R_InitImages( void ) {
-	Com_Memset(hashTable, 0, sizeof(hashTable));
+void R_InitImages( void ) {
+
+	Com_Memset( hashTable, 0, sizeof( hashTable ) );
+
 	// build brightness translation tables
 	R_SetColorMappings();
 
@@ -1559,7 +1561,7 @@ qhandle_t RE_RegisterSkin( const char *name ) {
 	Q_strncpyz( skin->name, name, sizeof( skin->name ) );
 	skin->numSurfaces = 0;
 
-	R_IssuePendingRenderCommands();
+	//R_IssuePendingRenderCommands();
 
 	// If not a .skin file, load as a single shader
 	if ( strcmp( name + strlen( name ) - 5, ".skin" ) ) {

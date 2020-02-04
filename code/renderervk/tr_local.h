@@ -323,9 +323,9 @@ typedef struct {
 	texModInfo_t	*texMods;
 
 	int				videoMapHandle;
-	int				isScreenMap;
 	qboolean		isLightmap;
 	qboolean		isVideoMap;
+	qboolean		isScreenMap;
 } textureBundle_t;
 
 #define NUM_TEXTURE_BUNDLES 2
@@ -560,7 +560,7 @@ typedef struct {
 
 typedef enum {
 	PV_NONE = 0,
-	PV_PORTAL,
+	PV_PORTAL, // this view is through a portal
 	PV_MIRROR, // portal + inverted face culling
 	PV_COUNT
 } portalView_t;
@@ -1106,7 +1106,7 @@ typedef struct {
 	image_t					*identityLightImage;	// full of tr.identityLightByte
 
 	shader_t				*defaultShader;
-	shader_t                *cinematicShader;
+	shader_t				*cinematicShader;
 	shader_t				*shadowShader;
 	shader_t				*projectionShadowShader;
 
@@ -1788,7 +1788,6 @@ typedef struct
 {
 	int commandId;
 } clearColorCommand_t;
-
 
 typedef enum {
 	RC_END_OF_LIST,

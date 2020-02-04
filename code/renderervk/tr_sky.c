@@ -398,7 +398,7 @@ static void DrawSkyBox( const shader_t *shader )
 
 	Com_Memset( s_skyTexCoords, 0, sizeof( s_skyTexCoords ) );
 
-	for ( i = 0 ; i < 6 ; i++ )
+	for ( i = 0; i < 6; i++ )
 	{
 		int sky_mins_subd[2], sky_maxs_subd[2];
 		int s, t;
@@ -508,18 +508,20 @@ static void DrawSkyBox( const shader_t *shader )
 			sky_maxs_subd);
 #endif
 	}
-
 }
 
 
-static void FillCloudySkySide( const int mins[2], const int maxs[2], qboolean addIndexes )
+static void FillCloudySkySide( const int mins[2], const int maxs[2] )
 {
-	int s, t;
-	int vertexStart = tess.numVertexes;
+	const int vertexStart = tess.numVertexes;
 	int tHeight, sWidth;
+	int s, t;
 
 	tHeight = maxs[1] - mins[1] + 1;
 	sWidth = maxs[0] - mins[0] + 1;
+
+	if ( tess.numVertexes + tHeight * sWidth > SHADER_MAX_VERTEXES )
+		ri.Error( ERR_DROP, "SHADER_MAX_VERTEXES hit in FillCloudySkySide()" );
 
 	for ( t = mins[1]+HALF_SKY_SUBDIVISIONS; t <= maxs[1]+HALF_SKY_SUBDIVISIONS; t++ )
 	{
@@ -530,40 +532,32 @@ static void FillCloudySkySide( const int mins[2], const int maxs[2], qboolean ad
 			tess.texCoords[tess.numVertexes][0][1] = s_skyTexCoords[t][s][1];
 
 			tess.numVertexes++;
-
-			if ( tess.numVertexes >= SHADER_MAX_VERTEXES )
-			{
-				ri.Error( ERR_DROP, "SHADER_MAX_VERTEXES hit in FillCloudySkySide()" );
-			}
 		}
 	}
 
-	// only add indexes for one pass, otherwise it would draw multiple times for each pass
-	if ( addIndexes ) {
-		for ( t = 0; t < tHeight-1; t++ )
-		{	
-			for ( s = 0; s < sWidth-1; s++ )
-			{
-				tess.indexes[tess.numIndexes] = vertexStart + s + t * ( sWidth );
-				tess.numIndexes++;
-				tess.indexes[tess.numIndexes] = vertexStart + s + ( t + 1 ) * ( sWidth );
-				tess.numIndexes++;
-				tess.indexes[tess.numIndexes] = vertexStart + s + 1 + t * ( sWidth );
-				tess.numIndexes++;
+	for ( t = 0; t < tHeight-1; t++ )
+	{	
+		for ( s = 0; s < sWidth-1; s++ )
+		{
+			tess.indexes[tess.numIndexes] = vertexStart + s + t * ( sWidth );
+			tess.numIndexes++;
+			tess.indexes[tess.numIndexes] = vertexStart + s + ( t + 1 ) * ( sWidth );
+			tess.numIndexes++;
+			tess.indexes[tess.numIndexes] = vertexStart + s + 1 + t * ( sWidth );
+			tess.numIndexes++;
 
-				tess.indexes[tess.numIndexes] = vertexStart + s + ( t + 1 ) * ( sWidth );
-				tess.numIndexes++;
-				tess.indexes[tess.numIndexes] = vertexStart + s + 1 + ( t + 1 ) * ( sWidth );
-				tess.numIndexes++;
-				tess.indexes[tess.numIndexes] = vertexStart + s + 1 + t * ( sWidth );
-				tess.numIndexes++;
-			}
+			tess.indexes[tess.numIndexes] = vertexStart + s + ( t + 1 ) * ( sWidth );
+			tess.numIndexes++;
+			tess.indexes[tess.numIndexes] = vertexStart + s + 1 + ( t + 1 ) * ( sWidth );
+			tess.numIndexes++;
+			tess.indexes[tess.numIndexes] = vertexStart + s + 1 + t * ( sWidth );
+			tess.numIndexes++;
 		}
 	}
 }
 
 
-static void FillCloudBox( const shader_t *shader, int stage )
+static void FillCloudBox( void )
 {
 	int i;
 
@@ -653,8 +647,7 @@ static void FillCloudBox( const shader_t *shader, int stage )
 			}
 		}
 
-		// only add indexes for first stage
-		FillCloudySkySide( sky_mins_subd, sky_maxs_subd, ( stage == 0 ) );
+		FillCloudySkySide( sky_mins_subd, sky_maxs_subd );
 	}
 }
 
@@ -665,11 +658,8 @@ static void FillCloudBox( const shader_t *shader, int stage )
 void R_BuildCloudData( shaderCommands_t *input )
 {
 	const shader_t *shader;
-	int i;
 
 	shader = input->shader;
-
-	//assert( shader->isSky );
 
 	sky_min = 1.0 / 256.0f;		// FIXME: not correct?
 	sky_max = 255.0 / 256.0f;
@@ -680,12 +670,9 @@ void R_BuildCloudData( shaderCommands_t *input )
 
 	if ( shader->sky.cloudHeight )
 	{
-		for ( i = 0; i < MAX_SHADER_STAGES; i++ )
+		if ( tess.xstages[0] )
 		{
-			if ( !tess.xstages[i] ) {
-				break;
-			}
-			FillCloudBox( shader, i );
+			FillCloudBox();
 		}
 	}
 }
