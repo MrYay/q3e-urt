@@ -44,7 +44,7 @@ typedef enum
 } imgFlags_t;
 
 typedef enum {
-	CT_FRONT_SIDED,
+	CT_FRONT_SIDED = 0,
 	CT_BACK_SIDED,
 	CT_TWO_SIDED
 } cullType_t;
@@ -61,7 +61,7 @@ typedef struct image_s {
 #ifdef USE_VULKAN
 	int			internalFormat;
 
-	int			wrapClampMode;
+	VkSamplerAddressMode wrapClampMode;
 	VkImage		handle;
 	VkImageView	view;
 	// Descriptor set that contains single descriptor used to access the given image.
@@ -120,6 +120,7 @@ void  R_NoiseInit( void );
 
 image_t *R_FindImageFile( const char *name, imgFlags_t flags );
 image_t *R_CreateImage( const char *name, byte *pic, int width, int height, imgFlags_t flags );
+void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t *image );
 
 void R_IssuePendingRenderCommands( void );
 qhandle_t RE_RegisterShaderLightMap( const char *name, int lightmapIndex );

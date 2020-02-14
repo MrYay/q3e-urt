@@ -97,16 +97,38 @@ void GL_SelectTexture( int unit )
 	}
 #ifndef USE_VULKAN
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
-	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
 #endif
 	glState.currenttmu = unit;
 }
 
 
 /*
+** GL_SelectClientTexture
+*/
+#ifndef USE_VULKAN
+static void GL_SelectClientTexture( int unit )
+{
+	if ( glState.currentArray == unit )
+	{
+		return;
+	}
+
+	if ( unit >= glConfig.numTextureUnits )
+	{
+		ri.Error( ERR_DROP, "GL_SelectClientTexture: unit = %i", unit );
+	}
+
+	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+
+	glState.currentArray = unit;
+}
+#endif
+
+
+/*
 ** GL_Cull
 */
-void GL_Cull( int cullType ) {
+void GL_Cull( cullType_t cullType ) {
 	if ( glState.faceCulling == cullType ) {
 		return;
 	}
@@ -123,7 +145,7 @@ void GL_Cull( int cullType ) {
 		qglEnable( GL_CULL_FACE );
 
 		cullFront = (cullType == CT_FRONT_SIDED);
-		if ( backEnd.viewParms.isMirror )
+		if ( backEnd.viewParms.portalView == PV_MIRROR )
 		{
 			cullFront = !cullFront;
 		}
@@ -167,16 +189,16 @@ void GL_TexEnv( GLint env )
 ** This routine is responsible for setting the most commonly changed state
 ** in Q3.
 */
-void GL_State( unsigned long stateBits )
+void GL_State( unsigned stateBits )
 {
-	unsigned long diff = stateBits ^ glState.glStateBits;
+#ifndef USE_VULKAN
+	unsigned diff = stateBits ^ glState.glStateBits;
 
 	if ( !diff )
 	{
 		return;
 	}
 
-#ifndef USE_VULKAN
 	//
 	// check depthFunc bits
 	//
@@ -195,11 +217,11 @@ void GL_State( unsigned long stateBits )
 	//
 	// check blend bits
 	//
-	if ( diff & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+	if ( diff & GLS_BLEND_BITS )
 	{
 		GLenum srcFactor = GL_ONE, dstFactor = GL_ONE;
 
-		if ( stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+		if ( stateBits & GLS_BLEND_BITS )
 		{
 			switch ( stateBits & GLS_SRCBLEND_BITS )
 			{
@@ -347,11 +369,55 @@ void GL_State( unsigned long stateBits )
 			break;
 		}
 	}
-#endif
 
 	glState.glStateBits = stateBits;
+#endif // USE_VULKAN
 }
 
+
+#ifndef USE_VULKAN
+void GL_ClientState( int unit, unsigned stateBits )
+{
+	unsigned diff = stateBits ^ glState.glClientStateBits[ unit ];
+
+	if ( diff == 0 )
+	{
+		if ( stateBits )
+		{
+			GL_SelectClientTexture( unit );
+		}
+		return;
+	}
+
+	GL_SelectClientTexture( unit );
+
+	if ( diff & CLS_COLOR_ARRAY )
+	{
+		if ( stateBits & CLS_COLOR_ARRAY )
+			qglEnableClientState( GL_COLOR_ARRAY );
+		else
+			qglDisableClientState( GL_COLOR_ARRAY );
+	}
+
+	if ( diff & CLS_NORMAL_ARRAY )
+	{
+		if ( stateBits & CLS_NORMAL_ARRAY )
+			qglEnableClientState( GL_NORMAL_ARRAY );
+		else
+			qglDisableClientState( GL_NORMAL_ARRAY );
+	}
+
+	if ( diff & CLS_TEXCOORD_ARRAY )
+	{
+		if ( stateBits & CLS_TEXCOORD_ARRAY )
+			qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+		else
+			qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+	}
+
+	glState.glClientStateBits[ unit ] = stateBits;
+}
+#endif
 
 
 /*
@@ -478,7 +544,7 @@ static void RB_BeginDrawingView( void ) {
 
 #ifndef USE_VULKAN
 	// clip to the plane of the portal
-	if ( backEnd.viewParms.isPortal ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		float	plane[4];
 		GLdouble plane2[4];
 
@@ -748,7 +814,7 @@ static void RB_BeginDrawingLitSurfs( void )
 	glState.faceCulling = -1;		// force face culling to set next time
 
 	// clip to the plane of the portal
-	if ( backEnd.viewParms.isPortal ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		float	plane[4];
 		GLdouble plane2[4];
 
@@ -757,10 +823,10 @@ static void RB_BeginDrawingLitSurfs( void )
 		plane[2] = backEnd.viewParms.portalPlane.normal[2];
 		plane[3] = backEnd.viewParms.portalPlane.dist;
 
-		plane2[0] = DotProduct (backEnd.viewParms.or.axis[0], plane);
-		plane2[1] = DotProduct (backEnd.viewParms.or.axis[1], plane);
-		plane2[2] = DotProduct (backEnd.viewParms.or.axis[2], plane);
-		plane2[3] = DotProduct (plane, backEnd.viewParms.or.origin) - plane[3];
+		plane2[0] = DotProduct( backEnd.viewParms.or.axis[0], plane );
+		plane2[1] = DotProduct( backEnd.viewParms.or.axis[1], plane );
+		plane2[2] = DotProduct( backEnd.viewParms.or.axis[2], plane );
+		plane2[3] = DotProduct( plane, backEnd.viewParms.or.origin ) - plane[3];
 
 		qglLoadMatrixf( s_flipMatrix );
 		qglClipPlane( GL_CLIP_PLANE0, plane2 );
@@ -1066,14 +1132,14 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int
 #ifdef USE_VULKAN
 		qvkDestroyImage( vk.device, image->handle, NULL );
 		qvkDestroyImageView( vk.device, image->view, NULL );
-		vk_create_image( cols, rows, VK_FORMAT_R8G8B8A8_UNORM, 1, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, image );
+		vk_create_image( cols, rows, VK_FORMAT_R8G8B8A8_UNORM, 1, image->wrapClampMode, image );
 		vk_upload_image_data( image->handle, 0, 0, cols, rows, qfalse, data, 4 );
 #else
 		qglTexImage2D( GL_TEXTURE_2D, 0, image->internalFormat, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );	
+		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gl_clamp_mode );
+		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gl_clamp_mode );
 #endif
 	} else if ( dirty ) {
 		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
@@ -1158,29 +1224,29 @@ static const void *RB_StretchPic( const void *data ) {
 	tess.xyz[ numVerts ][1] = cmd->y;
 	tess.xyz[ numVerts ][2] = 0;
 
-	tess.texCoords[ numVerts ][0][0] = cmd->s1;
-	tess.texCoords[ numVerts ][0][1] = cmd->t1;
+	tess.texCoords[0][ numVerts + 0][0] = cmd->s1;
+	tess.texCoords[0][ numVerts + 0][1] = cmd->t1;
 
 	tess.xyz[ numVerts + 1 ][0] = cmd->x + cmd->w;
 	tess.xyz[ numVerts + 1 ][1] = cmd->y;
 	tess.xyz[ numVerts + 1 ][2] = 0;
 
-	tess.texCoords[ numVerts + 1 ][0][0] = cmd->s2;
-	tess.texCoords[ numVerts + 1 ][0][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 1][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 1][1] = cmd->t1;
 
 	tess.xyz[ numVerts + 2 ][0] = cmd->x + cmd->w;
 	tess.xyz[ numVerts + 2 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 2 ][2] = 0;
 
-	tess.texCoords[ numVerts + 2 ][0][0] = cmd->s2;
-	tess.texCoords[ numVerts + 2 ][0][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 2][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 2][1] = cmd->t2;
 
 	tess.xyz[ numVerts + 3 ][0] = cmd->x;
 	tess.xyz[ numVerts + 3 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 3 ][2] = 0;
 
-	tess.texCoords[ numVerts + 3 ][0][0] = cmd->s1;
-	tess.texCoords[ numVerts + 3 ][0][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 3][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 3][1] = cmd->t2;
 
 	return (const void *)(cmd + 1);
 }
@@ -1232,7 +1298,7 @@ static void transform_to_eye_space( const vec3_t v, vec3_t v_eye )
 RB_DebugPolygon
 ================
 */
-void RB_DebugPolygon( int color, int numPoints, float *points ) {
+static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 #ifdef USE_VULKAN
 	vec3_t pa;
 	vec3_t pb;
@@ -1495,7 +1561,7 @@ void RB_ShowImages( void )
 
 		GL_Bind( image );
 
-		Com_Memset( tess.svars.colors, tr.identityLightByte, tess.numVertexes * 4 );
+		Com_Memset( tess.svars.colors, tr.identityLightByte, tess.numVertexes * sizeof( tess.svars.colors[0] ) );
 
 		tess.numIndexes = 6;
 		tess.numVertexes = 4;
@@ -1526,6 +1592,8 @@ void RB_ShowImages( void )
 		tess.xyz[3][1] = y + h;
 		tess.svars.texcoords[0][3][0] = 0;
 		tess.svars.texcoords[0][3][1] = 1;
+
+		tess.svars.texcoordPtr[0] = tess.svars.texcoords[0];
 
 		vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA | TESS_ST0 );
 		vk_draw_geometry( vk.images_debug_pipeline, DEPTH_RANGE_NORMAL, qtrue );

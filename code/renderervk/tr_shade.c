@@ -149,44 +149,22 @@ static void R_DrawStripElements( int numIndexes, const glIndex_t *indexes, void 
 
 	qglEnd();
 }
-#endif
 
 
 /*
 ==================
 R_DrawElements
-
-Optionally performs our own glDrawElements that looks for strip conditions
-instead of using the single glDrawElements call that may be inefficient
-without compiled vertex arrays.
 ==================
 */
 void R_DrawElements( int numIndexes, const glIndex_t *indexes ) {
-#ifndef USE_VULKAN
-	int		primitives;
 
-	// default is to use triangles if compiled vertex arrays are present
-	if ( qglLockArraysEXT ) {
-		primitives = 2;
-	} else {
-		primitives = 1;
-	}
-
-	if ( primitives == 2 ) {
-		qglDrawElements( GL_TRIANGLES, 
-						numIndexes,
-						GL_INDEX_TYPE,
-						indexes );
-		return;
-	}
-
-	if ( primitives == 1 ) {
-		R_DrawStripElements( numIndexes,  indexes, qglArrayElement );
-		return;
-	}
-#endif	
-	// anything else will cause no drawing
+	//if ( qglLockArraysEXT ) {
+		qglDrawElements( GL_TRIANGLES, numIndexes, GL_INDEX_TYPE, indexes );
+	//} else {
+	//	R_DrawStripElements( numIndexes,  indexes, qglArrayElement );
+	//}
 }
+#endif
 
 
 /*
@@ -221,7 +199,11 @@ void R_BindAnimatedImage( const textureBundle_t *bundle ) {
 		if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
 			GL_Bind( tr.blackImage );
 		else
+#ifdef USE_SINGLE_FBO
 			vk_update_descriptor( 1, vk.color_descriptor3 );
+#else
+			vk_update_descriptor( 1, vk.cmd->color_descriptor3 );
+#endif
 		return;
 	}
 
@@ -282,16 +264,18 @@ static void DrawTris( shaderCommands_t *input ) {
 	vk_draw_geometry( pipeline, DEPTH_RANGE_ZERO, qtrue );
 
 #else
-	GL_Bind( tr.whiteImage );
+	if ( (r_showtris->integer == 1 && backEnd.doneSurfaces) || (r_showtris->integer == 2 && backEnd.drawConsole) )
+		return;
+
+	GL_ClientState( 0, CLS_NONE );
+	qglDisable( GL_TEXTURE_2D );
+
 	qglColor3f( 1, 1, 1 );
 
 	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
 	qglDepthRange( 0, 0 );
 
-	qglDisableClientState( GL_COLOR_ARRAY );
-	qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
-
-	qglVertexPointer( 3, GL_FLOAT, 16, input->xyz ); // padded for SIMD
+	qglVertexPointer( 3, GL_FLOAT, sizeof( input->xyz[0] ), input->xyz );
 
 	if ( qglLockArraysEXT ) {
 		qglLockArraysEXT( 0, input->numVertexes );
@@ -299,9 +283,11 @@ static void DrawTris( shaderCommands_t *input ) {
 
 	R_DrawElements( input->numIndexes, input->indexes );
 
-	if ( qglUnlockArraysEXT ) { 
+	if ( qglUnlockArraysEXT ) {
 		qglUnlockArraysEXT();
 	}
+
+	qglEnable( GL_TEXTURE_2D );
 
 	qglDepthRange( 0, 1 );
 #endif
@@ -318,9 +304,6 @@ Draws vertex normals for debugging
 static void DrawNormals( const shaderCommands_t *input ) {
 	int		i;
 #ifdef USE_VULKAN
-	vec4_t xyz[ SHADER_MAX_VERTEXES ];
-	int numVertexes, k;
-	
 #ifdef USE_VBO	
 	if ( tess.vboIndex )
 		return; // must be handled specially
@@ -328,44 +311,49 @@ static void DrawNormals( const shaderCommands_t *input ) {
 
 	GL_Bind( tr.whiteImage );
 
-	Com_Memcpy( xyz, tess.xyz, tess.numVertexes * sizeof(vec4_t) );
-	Com_Memset( tess.svars.colors, tr.identityLightByte, SHADER_MAX_VERTEXES * sizeof(color4ub_t) );
-	numVertexes = tess.numVertexes;
-
-	tess.numVertexes = SHADER_MAX_VERTEXES;
-	vk_bind_geometry_ext( TESS_RGBA );
-	tess.numVertexes = numVertexes;
-
-	i = 0;
-	while ( i < numVertexes ) {
-		int count = numVertexes - i;
-		if ( count >= SHADER_MAX_VERTEXES/2 - 1 )
-			count = SHADER_MAX_VERTEXES/2 - 1;
-
-		for ( k = 0; k < count; k++ ) {
-			VectorCopy(xyz[i + k], tess.xyz[2*k]);
-			VectorMA(xyz[i + k], 2, input->normal[i + k], tess.xyz[2*k + 1]);
-		}
-		tess.numVertexes = 2 * count;
-		tess.numIndexes = 0;
-		vk_bind_geometry_ext( TESS_XYZ );
-		vk_draw_geometry( vk.normals_debug_pipeline, DEPTH_RANGE_ZERO, qfalse );
-		i += count;
+	tess.numIndexes = 0;
+	for ( i = 0; i < tess.numVertexes; i++ ) {
+		VectorMA( tess.xyz[i], 2.0, tess.normal[i], tess.xyz[i + tess.numVertexes] );
+		tess.indexes[  tess.numIndexes + 0 ] = i;
+		tess.indexes[  tess.numIndexes + 1 ] = i + tess.numVertexes;
+		tess.numIndexes += 2;
 	}
+	tess.numVertexes *= 2;
+	Com_Memset( tess.svars.colors, tr.identityLightByte, tess.numVertexes * sizeof(color4ub_t) );
+
+	vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA );
+	vk_draw_geometry( vk.normals_debug_pipeline, DEPTH_RANGE_ZERO, qtrue );
 #else
-	vec3_t	temp;
-	GL_Bind( tr.whiteImage );
-	qglColor3f (1,1,1);
+	GL_ClientState( 0, CLS_NONE );
+
+	qglDisable( GL_TEXTURE_2D );
+	qglColor3f( 1, 1, 1 );
+
 	qglDepthRange( 0, 0 );	// never occluded
+
 	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
 
-	qglBegin (GL_LINES);
-	for (i = 0 ; i < input->numVertexes ; i++) {
-		qglVertex3fv (input->xyz[i]);
-		VectorMA (input->xyz[i], 2, input->normal[i], temp);
-		qglVertex3fv (temp);
+	tess.numIndexes = 0;
+	for ( i = 0; i < tess.numVertexes; i++ ) {
+		VectorMA( tess.xyz[i], 2.0, tess.normal[i], tess.xyz[i + tess.numVertexes] );
+		tess.indexes[  tess.numIndexes + 0 ] = i;
+		tess.indexes[  tess.numIndexes + 1 ] = i + tess.numVertexes;
+		tess.numIndexes += 2;
 	}
-	qglEnd ();
+
+	qglVertexPointer( 3, GL_FLOAT, sizeof( tess.xyz[0] ), tess.xyz );
+
+	if ( qglLockArraysEXT ) {
+		qglLockArraysEXT( 0, tess.numVertexes * 2 );
+	}
+
+	qglDrawElements( GL_LINES, tess.numIndexes, GL_INDEX_TYPE, tess.indexes );
+
+	if ( qglUnlockArraysEXT ) {
+		qglUnlockArraysEXT();
+	}
+
+	qglEnable( GL_TEXTURE_2D );
 
 	qglDepthRange( 0, 1 );
 #endif
@@ -403,6 +391,18 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	if ( tess.fogNum != fogNum ) {
 		tess.dlightUpdateParams = qtrue;
 	}
+#endif
+
+#ifdef USE_TESS_NEEDS_NORMAL
+#ifdef USE_PMLIGHT
+	tess.needsNormal = state->needsNormal || tess.dlightPass || r_shownormals->integer;
+#else
+	tess.needsNormal = state->needsNormal || r_shownormals->integer;
+#endif
+#endif
+
+#ifdef USE_TESS_NEEDS_ST2
+	tess.needsST2 = state->needsST2;
 #endif
 
 	tess.numIndexes = 0;
@@ -443,16 +443,27 @@ static void DrawMultitextured( const shaderCommands_t *input, int stage ) {
 
 	// this is an ugly hack to work around a GeForce driver
 	// bug with multitexture and clip planes
-	if ( backEnd.viewParms.isPortal ) {
+	if ( backEnd.viewParms.portalView != PV_NONE ) {
 		qglPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
+	}
+
+	if ( !setArraysOnce ) {
+		R_ComputeColors( pStage );
+		R_ComputeTexCoords( 0, &pStage->bundle[0] );
+		R_ComputeTexCoords( 1, &pStage->bundle[1] );
+		GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
+
+		qglTexCoordPointer( 2, GL_FLOAT, 0, input->svars.texcoordPtr[0] );
+		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, input->svars.colors );
+
+		GL_ClientState( 1, CLS_TEXCOORD_ARRAY );
+		qglTexCoordPointer( 2, GL_FLOAT, 0, input->svars.texcoordPtr[1] );
 	}
 
 	//
 	// base
 	//
 	GL_SelectTexture( 0 );
-	qglTexCoordPointer( 2, GL_FLOAT, 0, input->svars.texcoords[0] );
-
 	R_BindAnimatedImage( &pStage->bundle[0] );
 
 	//
@@ -460,7 +471,7 @@ static void DrawMultitextured( const shaderCommands_t *input, int stage ) {
 	//
 	GL_SelectTexture( 1 );
 	qglEnable( GL_TEXTURE_2D );
-	qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+	R_BindAnimatedImage( &pStage->bundle[1] );
 
 	if ( r_lightmap->integer ) {
 		GL_TexEnv( GL_REPLACE );
@@ -468,16 +479,13 @@ static void DrawMultitextured( const shaderCommands_t *input, int stage ) {
 		GL_TexEnv( pStage->mtEnv );
 	}
 
-	qglTexCoordPointer( 2, GL_FLOAT, 0, input->svars.texcoords[1] );
-
-	R_BindAnimatedImage( &pStage->bundle[1] );
-
 	R_DrawElements( input->numIndexes, input->indexes );
 
 	//
 	// disable texturing on TEXTURE1, then select TEXTURE0
 	//
-	qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+	//GL_ClientState( 1, CLS_NONE );
+
 	qglDisable( GL_TEXTURE_2D );
 	GL_SelectTexture( 0 );
 }
@@ -524,6 +532,7 @@ static void ProjectDlightTexture_scalar( void ) {
 
 #ifdef USE_VULKAN
 		texCoords = (float*)&tess.svars.texcoords[0][0];
+		tess.svars.texcoordPtr[0] = tess.svars.texcoords[0];
 		colors = (byte*)&tess.svars.colors[0][0];
 #else
 		texCoords = texCoordsArray[0];
@@ -610,10 +619,10 @@ static void ProjectDlightTexture_scalar( void ) {
 		}
 
 #ifndef USE_VULKAN
-		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-		qglTexCoordPointer( 2, GL_FLOAT, 0, texCoordsArray[0] );
+		GL_ClientState( 1, CLS_NONE );
+		GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
 
-		qglEnableClientState( GL_COLOR_ARRAY );
+		qglTexCoordPointer( 2, GL_FLOAT, 0, texCoordsArray[0] );
 		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, colorArray );
 #endif
 
@@ -622,9 +631,8 @@ static void ProjectDlightTexture_scalar( void ) {
 #ifdef USE_VULKAN
 		pipeline = vk.dlight_pipelines[dl->additive > 0 ? 1 : 0][tess.shader->cullType][tess.shader->polygonOffset];
 		vk_bind_geometry_ext( TESS_RGBA | TESS_ST0 );
-		vk_draw_geometry( pipeline, 1, DEPTH_RANGE_NORMAL, qtrue );
+		vk_draw_geometry( pipeline, DEPTH_RANGE_NORMAL, qtrue );
 #else
-
 		// include GLS_DEPTHFUNC_EQUAL so alpha tested surfaces don't add light
 		// where they aren't rendered
 
@@ -638,7 +646,6 @@ static void ProjectDlightTexture_scalar( void ) {
 #endif
 		backEnd.pc.c_totalIndexes += numIndexes;
 		backEnd.pc.c_dlightIndexes += numIndexes;
-
 	}
 }
 
@@ -675,11 +682,14 @@ static void RB_FogPass( void ) {
 	int			i;
 
 	fog = tr.world->fogs + tess.fogNum;
+
 	for ( i = 0; i < tess.numVertexes; i++ ) {
 		* ( int * )&tess.svars.colors[i] = fog->colorInt;
 	}
+
 	RB_CalcFogTexCoords( ( float * ) tess.svars.texcoords[0] );
 	GL_Bind( tr.fogImage );
+	tess.svars = tess.svars.texcoords[0]; // FIXMEEE!
 	vk_bind_geometry_ext( TESS_ST0 | TESS_RGBA );
 	vk_draw_geometry( pipeline, DEPTH_RANGE_NORMAL, qtrue );
 #endif
@@ -687,20 +697,15 @@ static void RB_FogPass( void ) {
 	const fog_t	*fog;
 	int			i;
 
-	qglEnableClientState( GL_COLOR_ARRAY );
-	qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, tess.svars.colors );
-
-	qglEnableClientState( GL_TEXTURE_COORD_ARRAY);
-	qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[0] );
-
-	fog = tr.world->fogs + tess.fogNum;
-
-	for ( i = 0; i < tess.numVertexes; i++ ) {
-		* ( int * )&tess.svars.colors[i] = fog->colorInt;
-	}
-
 	RB_CalcFogTexCoords( ( float * ) tess.svars.texcoords[0] );
 
+	GL_ClientState( 1, CLS_NONE );
+	GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
+
+	qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, tess.svars.colors );
+	qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[0] );
+
+	GL_SelectTexture( 0 );
 	GL_Bind( tr.fogImage );
 
 	if ( tess.shader->fogPass == FP_EQUAL ) {
@@ -911,12 +916,15 @@ void R_ComputeColors( const shaderStage_t *pStage )
 R_ComputeTexCoords
 ===============
 */
-void R_ComputeTexCoords( int b, const textureBundle_t *bundle ) {
+void R_ComputeTexCoords( const int b, const textureBundle_t *bundle ) {
 	int	i;
 	int tm;
+	vec2_t *src, *dst;
 
 	if ( !tess.numVertexes )
 		return;
+
+	src = dst = tess.svars.texcoords[b];
 
 	//
 	// generate the texture coordinates
@@ -924,34 +932,28 @@ void R_ComputeTexCoords( int b, const textureBundle_t *bundle ) {
 	switch ( bundle->tcGen )
 	{
 	case TCGEN_IDENTITY:
-		Com_Memset( tess.svars.texcoords[b], 0, sizeof( float ) * 2 * tess.numVertexes );
+		src = tess.texCoords00;
 		break;
 	case TCGEN_TEXTURE:
-		for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-			tess.svars.texcoords[b][i][0] = tess.texCoords[i][0][0];
-			tess.svars.texcoords[b][i][1] = tess.texCoords[i][0][1];
-		}
+		src = tess.texCoords[0];
 		break;
 	case TCGEN_LIGHTMAP:
-		for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-			tess.svars.texcoords[b][i][0] = tess.texCoords[i][1][0];
-			tess.svars.texcoords[b][i][1] = tess.texCoords[i][1][1];
-		}
+		src = tess.texCoords[1];
 		break;
 	case TCGEN_VECTOR:
 		for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-			tess.svars.texcoords[b][i][0] = DotProduct( tess.xyz[i], bundle->tcGenVectors[0] );
-			tess.svars.texcoords[b][i][1] = DotProduct( tess.xyz[i], bundle->tcGenVectors[1] );
+			dst[i][0] = DotProduct( tess.xyz[i], bundle->tcGenVectors[0] );
+			dst[i][1] = DotProduct( tess.xyz[i], bundle->tcGenVectors[1] );
 		}
 		break;
 	case TCGEN_FOG:
-		RB_CalcFogTexCoords( ( float * ) tess.svars.texcoords[b] );
+		RB_CalcFogTexCoords( ( float * ) dst );
 		break;
 	case TCGEN_ENVIRONMENT_MAPPED:
-		RB_CalcEnvironmentTexCoords( ( float * ) tess.svars.texcoords[b] );
+		RB_CalcEnvironmentTexCoords( ( float * ) dst );
 		break;
 	case TCGEN_ENVIRONMENT_MAPPED_FP:
-		RB_CalcEnvironmentTexCoordsFP( ( float * ) tess.svars.texcoords[b], bundle->isScreenMap );
+		RB_CalcEnvironmentTexCoordsFP( ( float * ) dst, bundle->isScreenMap );
 		break;
 	case TCGEN_BAD:
 		return;
@@ -968,38 +970,38 @@ void R_ComputeTexCoords( int b, const textureBundle_t *bundle ) {
 			break;
 
 		case TMOD_TURBULENT:
-			RB_CalcTurbulentTexCoords( &bundle->texMods[tm].wave, 
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcTurbulentTexCoords( &bundle->texMods[tm].wave, (float *)src, (float *) dst );
+			src = dst;
 			break;
 
 		case TMOD_ENTITY_TRANSLATE:
-			RB_CalcScrollTexCoords( backEnd.currentEntity->e.shaderTexCoord,
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcScrollTexCoords( backEnd.currentEntity->e.shaderTexCoord, (float *)src, (float *) dst );
+			src = dst;
 			break;
 
 		case TMOD_SCROLL:
-			RB_CalcScrollTexCoords( bundle->texMods[tm].scroll,
-				 ( float * ) tess.svars.texcoords[b] );
+			RB_CalcScrollTexCoords( bundle->texMods[tm].scroll, (float *)src, (float *) dst );
+			src = dst;
 			break;
 
 		case TMOD_SCALE:
-			RB_CalcScaleTexCoords( bundle->texMods[tm].scale,
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcScaleTexCoords( bundle->texMods[tm].scale, (float *) src, (float *) dst );
+			src = dst;
 			break;
 			
 		case TMOD_STRETCH:
-			RB_CalcStretchTexCoords( &bundle->texMods[tm].wave, 
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcStretchTexCoords( &bundle->texMods[tm].wave, (float *)src, (float *) dst );
+			src = dst;
 			break;
 
 		case TMOD_TRANSFORM:
-			RB_CalcTransformTexCoords( &bundle->texMods[tm],
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcTransformTexCoords( &bundle->texMods[tm], (float *)src, (float *) dst );
+			src = dst;
 			break;
 
 		case TMOD_ROTATE:
-			RB_CalcRotateTexCoords( bundle->texMods[tm].rotateSpeed,
-				( float * ) tess.svars.texcoords[b] );
+			RB_CalcRotateTexCoords( bundle->texMods[tm].rotateSpeed, (float *) src, (float *) dst );
+			src = dst;
 			break;
 
 		default:
@@ -1011,10 +1013,13 @@ void R_ComputeTexCoords( int b, const textureBundle_t *bundle ) {
 	if ( r_mergeLightmaps->integer && bundle->isLightmap && bundle->tcGen != TCGEN_LIGHTMAP ) {
 		// adjust texture coordinates to map on proper lightmap
 		for ( i = 0 ; i < tess.numVertexes ; i++ ) {
-			tess.svars.texcoords[b][i][0] = (tess.svars.texcoords[b][i][0] * tr.lightmapScale[0] ) + tess.shader->lightmapOffset[0];
-			tess.svars.texcoords[b][i][1] = (tess.svars.texcoords[b][i][1] * tr.lightmapScale[1] ) + tess.shader->lightmapOffset[1];
+			dst[i][0] = (src[i][0] * tr.lightmapScale[0] ) + tess.shader->lightmapOffset[0];
+			dst[i][1] = (src[i][1] * tr.lightmapScale[1] ) + tess.shader->lightmapOffset[1];
 		}
+		src = dst;
 	}
+
+	tess.svars.texcoordPtr[ b ] = src;
 }
 
 
@@ -1111,15 +1116,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			vk_draw_geometry( pipeline, tess.depthRange, qtrue );
 		}
 #else
-		if (!setArraysOnce)
-		{
-			qglEnableClientState(GL_COLOR_ARRAY);
-			qglColorPointer(4, GL_UNSIGNED_BYTE, 0, input->svars.colors);
-		}
 		//
 		// do multitexture
 		//
-		if (multitexture)
+		if ( multitexture )
 		{
 			DrawMultitextured( input, stage );
 		}
@@ -1127,7 +1127,14 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		{
 			if ( !setArraysOnce )
 			{
+				R_ComputeTexCoords( 0, &pStage->bundle[0] );
+				R_ComputeColors( pStage );
+
+				GL_ClientState( 1, CLS_NONE );
+				GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
+
 				qglTexCoordPointer( 2, GL_FLOAT, 0, input->svars.texcoords[0] );
+				qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, input->svars.colors );
 			}
 
 			//
@@ -1140,7 +1147,7 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			//
 			// draw
 			//
-			R_DrawElements(input->numIndexes, input->indexes);
+			R_DrawElements( input->numIndexes, input->indexes );
 		}
 #endif
 
@@ -1151,8 +1158,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		tess_flags = 0;
 	}
 
+#ifdef USE_VULKAN
 	if ( tess_flags ) // fog-only shaders?
 		vk_bind_geometry_ext( tess_flags );
+#endif
 }
 
 
@@ -1380,41 +1389,49 @@ void RB_StageIteratorGeneric( void )
 	// to avoid compiling those arrays since they will change
 	// during multipass rendering
 	//
-	if ( tess.numPasses > 1 || shader->multitextureEnv )
+	if ( tess.numPasses > 1 )
 	{
 		setArraysOnce = qfalse;
-		qglDisableClientState( GL_COLOR_ARRAY );
-		qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+
+		GL_ClientState( 1, CLS_NONE );
+		GL_ClientState( 0, CLS_NONE );
 	}
 	else
 	{
+		// FIXME: we can't do that if going to lighting/fog later?
 		setArraysOnce = qtrue;
 
-		qglEnableClientState( GL_COLOR_ARRAY );
-		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, tess.svars.colors );
+		if ( tess.xstages[0] )
+		{
+			R_ComputeColors( tess.xstages[0] );
+			R_ComputeTexCoords( 0, &tess.xstages[0]->bundle[0] );
+			if ( shader->multitextureEnv )
+			{
+				GL_ClientState( 1, CLS_TEXCOORD_ARRAY );
+				R_ComputeTexCoords( 1, &tess.xstages[0]->bundle[1] );
+				qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[1] );
+			}
+			else
+			{
+				GL_ClientState( 1, CLS_NONE );
+			}
+		}
 
-		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+		GL_ClientState( 0, CLS_COLOR_ARRAY | CLS_TEXCOORD_ARRAY );
+		qglColorPointer( 4, GL_UNSIGNED_BYTE, 0, tess.svars.colors );
 		qglTexCoordPointer( 2, GL_FLOAT, 0, tess.svars.texcoords[0] );
 	}
+
+	qglVertexPointer( 3, GL_FLOAT, sizeof( input->xyz[0] ), input->xyz ); // padded for SIMD
 
 	//
 	// lock XYZ
 	//
-	qglVertexPointer( 3, GL_FLOAT, sizeof( input->xyz[0] ), input->xyz ); // padded for SIMD
 	if ( qglLockArraysEXT )
 	{
 		qglLockArraysEXT( 0, input->numVertexes );
 	}
 
-	//
-	// enable color and texcoord arrays after the lock if necessary
-	//
-	if ( !setArraysOnce )
-	{
-		qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
-		qglEnableClientState( GL_COLOR_ARRAY );
-	}
-	
 	//
 	// call shader function
 	//
@@ -1423,7 +1440,8 @@ void RB_StageIteratorGeneric( void )
 	// 
 	// now do any dynamic lighting needed
 	//
-	if ( tess.dlightBits && tess.shader->sort <= SS_OPAQUE && !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) ) {
+	if ( tess.dlightBits && tess.shader->sort <= SS_OPAQUE && !(tess.shader->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) )
+	{
 		ProjectDlightTexture();
 	}
 
@@ -1442,6 +1460,8 @@ void RB_StageIteratorGeneric( void )
 	{
 		qglUnlockArraysEXT();
 	}
+
+	GL_ClientState( 1, CLS_NONE );
 
 	//
 	// reset polygon offset

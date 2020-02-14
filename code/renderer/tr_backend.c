@@ -94,37 +94,29 @@ void GL_SelectTexture( int unit )
 	}
 
 	qglActiveTextureARB( GL_TEXTURE0_ARB + unit );
-	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
 
 	glState.currenttmu = unit;
 }
 
 
 /*
-** GL_BindMultitexture
+** GL_SelectClientTexture
 */
-void GL_BindMultitexture( image_t *image0, GLuint env0, image_t *image1, GLuint env1 ) {
-	GLuint	texnum0, texnum1;
-
-	texnum0 = image0->texnum;
-	texnum1 = image1->texnum;
-
-	if ( r_nobind->integer && tr.dlightImage ) {		// performance evaluation option
-		texnum0 = texnum1 = tr.dlightImage->texnum;
+static void GL_SelectClientTexture( int unit )
+{
+	if ( glState.currentArray == unit )
+	{
+		return;
 	}
 
-	if ( glState.currenttextures[1] != texnum1 ) {
-		GL_SelectTexture( 1 );
-		image1->frameUsed = tr.frameCount;
-		glState.currenttextures[1] = texnum1;
-		qglBindTexture( GL_TEXTURE_2D, texnum1 );
+	if ( unit >= glConfig.numTextureUnits )
+	{
+		ri.Error( ERR_DROP, "GL_SelectClientTexture: unit = %i", unit );
 	}
-	if ( glState.currenttextures[0] != texnum0 ) {
-		GL_SelectTexture( 0 );
-		image0->frameUsed = tr.frameCount;
-		glState.currenttextures[0] = texnum0;
-		qglBindTexture( GL_TEXTURE_2D, texnum0 );
-	}
+
+	qglClientActiveTextureARB( GL_TEXTURE0_ARB + unit );
+
+	glState.currentArray = unit;
 }
 
 
@@ -177,12 +169,10 @@ void GL_Cull( cullType_t cullType ) {
 */
 void GL_TexEnv( GLint env )
 {
-	if ( env == glState.texEnv[glState.currenttmu] )
-	{
+	if ( env == glState.texEnv[ glState.currenttmu ] )
 		return;
-	}
 
-	glState.texEnv[glState.currenttmu] = env;
+	glState.texEnv[ glState.currenttmu ] = env;
 
 	switch ( env )
 	{
@@ -205,9 +195,9 @@ void GL_TexEnv( GLint env )
 ** This routine is responsible for setting the most commonly changed state
 ** in Q3.
 */
-void GL_State( unsigned long stateBits )
+void GL_State( unsigned stateBits )
 {
-	unsigned long diff = stateBits ^ glState.glStateBits;
+	unsigned diff = stateBits ^ glState.glStateBits;
 
 	if ( !diff )
 	{
@@ -232,11 +222,11 @@ void GL_State( unsigned long stateBits )
 	//
 	// check blend bits
 	//
-	if ( diff & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+	if ( diff & GLS_BLEND_BITS )
 	{
 		GLenum srcFactor = GL_ONE, dstFactor = GL_ONE;
 
-		if ( stateBits & ( GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS ) )
+		if ( stateBits & GLS_BLEND_BITS )
 		{
 			switch ( stateBits & GLS_SRCBLEND_BITS )
 			{
@@ -389,6 +379,48 @@ void GL_State( unsigned long stateBits )
 }
 
 
+void GL_ClientState( int unit, unsigned stateBits )
+{
+	unsigned diff = stateBits ^ glState.glClientStateBits[ unit ];
+
+	if ( diff == 0 )
+	{
+		if ( stateBits )
+		{
+			GL_SelectClientTexture( unit );
+		}
+		return;
+	}
+
+	GL_SelectClientTexture( unit );
+
+	if ( diff & CLS_COLOR_ARRAY )
+	{
+		if ( stateBits & CLS_COLOR_ARRAY )
+			qglEnableClientState( GL_COLOR_ARRAY );
+		else
+			qglDisableClientState( GL_COLOR_ARRAY );
+	}
+
+	if ( diff & CLS_NORMAL_ARRAY )
+	{
+		if ( stateBits & CLS_NORMAL_ARRAY )
+			qglEnableClientState( GL_NORMAL_ARRAY );
+		else
+			qglDisableClientState( GL_NORMAL_ARRAY );
+	}
+
+	if ( diff & CLS_TEXCOORD_ARRAY )
+	{
+		if ( stateBits & CLS_TEXCOORD_ARRAY )
+			qglEnableClientState( GL_TEXTURE_COORD_ARRAY );
+		else
+			qglDisableClientState( GL_TEXTURE_COORD_ARRAY );
+	}
+
+	glState.glClientStateBits[ unit ] = stateBits;
+}
+
 
 /*
 ================
@@ -455,6 +487,7 @@ static void RB_BeginDrawingView( void ) {
 
 	// ensures that depth writes are enabled for the depth clear
 	GL_State( GLS_DEFAULT );
+
 	// clear relevant buffers
 	clearBits = GL_DEPTH_BUFFER_BIT;
 
@@ -1017,8 +1050,8 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, const byte *data, int
 		qglTexImage2D( GL_TEXTURE_2D, 0, image->internalFormat, cols, rows, 0, GL_RGBA, GL_UNSIGNED_BYTE, data );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR );
 		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR );
-		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE );
-		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE );	
+		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, gl_clamp_mode );
+		qglTexParameteri( GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, gl_clamp_mode );
 	} else if ( dirty ) {
 		// otherwise, just subimage upload it so that drivers can tell we are going to be changing
 		// it and don't try and do a texture compression
@@ -1099,29 +1132,29 @@ static const void *RB_StretchPic( const void *data ) {
 	tess.xyz[ numVerts ][1] = cmd->y;
 	tess.xyz[ numVerts ][2] = 0;
 
-	tess.texCoords[ numVerts ][0][0] = cmd->s1;
-	tess.texCoords[ numVerts ][0][1] = cmd->t1;
+	tess.texCoords[0][ numVerts + 0][0] = cmd->s1;
+	tess.texCoords[0][ numVerts + 0][1] = cmd->t1;
 
 	tess.xyz[ numVerts + 1 ][0] = cmd->x + cmd->w;
 	tess.xyz[ numVerts + 1 ][1] = cmd->y;
 	tess.xyz[ numVerts + 1 ][2] = 0;
 
-	tess.texCoords[ numVerts + 1 ][0][0] = cmd->s2;
-	tess.texCoords[ numVerts + 1 ][0][1] = cmd->t1;
+	tess.texCoords[0][numVerts + 1][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 1][1] = cmd->t1;
 
 	tess.xyz[ numVerts + 2 ][0] = cmd->x + cmd->w;
 	tess.xyz[ numVerts + 2 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 2 ][2] = 0;
 
-	tess.texCoords[ numVerts + 2 ][0][0] = cmd->s2;
-	tess.texCoords[ numVerts + 2 ][0][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 2][0] = cmd->s2;
+	tess.texCoords[0][numVerts + 2][1] = cmd->t2;
 
 	tess.xyz[ numVerts + 3 ][0] = cmd->x;
 	tess.xyz[ numVerts + 3 ][1] = cmd->y + cmd->h;
 	tess.xyz[ numVerts + 3 ][2] = 0;
 
-	tess.texCoords[ numVerts + 3 ][0][0] = cmd->s1;
-	tess.texCoords[ numVerts + 3 ][0][1] = cmd->t2;
+	tess.texCoords[0][numVerts + 3][0] = cmd->s1;
+	tess.texCoords[0][numVerts + 3][1] = cmd->t2;
 
 	return (const void *)(cmd + 1);
 }
@@ -1269,22 +1302,6 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 /*
 =============
-RB_BindBuffer
-=============
-*/
-static const void *RB_BindBuffer( const void *data ) {
-	const bindBufferCommand_t	*cmd;
-
-	cmd = (const bindBufferCommand_t *)data;
-
-	FBO_BindMain();
-
-	return (const void *)(cmd + 1);
-}
-
-
-/*
-=============
 RB_DrawBuffer
 =============
 */
@@ -1294,6 +1311,7 @@ static const void *RB_DrawBuffer( const void *data ) {
 	cmd = (const drawBufferCommand_t *)data;
 
 	if ( fboEnabled ) {
+		FBO_BindMain();
 		qglDrawBuffer( GL_COLOR_ATTACHMENT0 );
 	} else {
 		qglDrawBuffer( cmd->buffer );
@@ -1574,9 +1592,6 @@ void RB_ExecuteRenderCommands( const void *data ) {
 			break;
 		case RC_DRAW_SURFS:
 			data = RB_DrawSurfs( data );
-			break;
-		case RC_BIND_BUFFER:
-			data = RB_BindBuffer( data );
 			break;
 		case RC_DRAW_BUFFER:
 			data = RB_DrawBuffer( data );

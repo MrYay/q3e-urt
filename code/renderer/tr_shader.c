@@ -1919,71 +1919,16 @@ otherwise set to the generic stage function
 */
 static void ComputeStageIteratorFunc( void )
 {
-	shader.optimalStageIteratorFunc = RB_StageIteratorGeneric;
-
 	//
 	// see if this should go into the sky path
 	//
 	if ( shader.isSky )
 	{
 		shader.optimalStageIteratorFunc = RB_StageIteratorSky;
-		return;
 	}
-
-	if ( r_ignoreFastPath->integer )
+	else
 	{
-		return;
-	}
-
-	//
-	// see if this can go into the vertex lit fast path
-	//
-	if ( shader.numUnfoggedPasses == 1 )
-	{
-		if ( stages[0].rgbGen == CGEN_LIGHTING_DIFFUSE )
-		{
-			if ( stages[0].alphaGen == AGEN_IDENTITY )
-			{
-				if ( stages[0].bundle[0].tcGen == TCGEN_TEXTURE )
-				{
-					if ( !shader.polygonOffset )
-					{
-						if ( !shader.multitextureEnv )
-						{
-							if ( !shader.numDeforms )
-							{
-								shader.optimalStageIteratorFunc = RB_StageIteratorVertexLitTexture;
-								return;
-							}
-						}
-					}
-				}
-			}
-		}
-	}
-
-	//
-	// see if this can go into an optimized LM, multitextured path
-	//
-	if ( shader.numUnfoggedPasses == 1 )
-	{
-		if ( ( stages[0].rgbGen == CGEN_IDENTITY ) && ( stages[0].alphaGen == AGEN_IDENTITY ) )
-		{
-			if ( stages[0].bundle[0].tcGen == TCGEN_TEXTURE && 
-				stages[0].bundle[1].tcGen == TCGEN_LIGHTMAP )
-			{
-				if ( !shader.polygonOffset )
-				{
-					if ( !shader.numDeforms )
-					{
-						if ( shader.multitextureEnv )
-						{
-							shader.optimalStageIteratorFunc = RB_StageIteratorLightmappedMultitexture;
-						}
-					}
-				}
-			}
-		}
+		shader.optimalStageIteratorFunc = RB_StageIteratorGeneric;
 	}
 }
 
@@ -2066,13 +2011,13 @@ static qboolean CollapseMultitexture( shaderStage_t *st0, shaderStage_t *st1, in
 	bbits = st1->stateBits;
 
 	// make sure that both stages have identical state other than blend modes
-	if ( ( abits & ~( GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS | GLS_DEPTHMASK_TRUE ) ) !=
-		( bbits & ~( GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS | GLS_DEPTHMASK_TRUE ) ) ) {
+	if ( ( abits & ~( GLS_BLEND_BITS | GLS_DEPTHMASK_TRUE ) ) !=
+		( bbits & ~( GLS_BLEND_BITS | GLS_DEPTHMASK_TRUE ) ) ) {
 		return qfalse;
 	}
 
-	abits &= ( GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS );
-	bbits &= ( GLS_DSTBLEND_BITS | GLS_SRCBLEND_BITS );
+	abits &= GLS_BLEND_BITS;
+	bbits &= GLS_BLEND_BITS;
 
 	// search for a valid multitexture blend function
 	for ( i = 0; collapse[i].blendA != -1 ; i++ ) {
@@ -2149,6 +2094,48 @@ static qboolean CollapseMultitexture( shaderStage_t *st0, shaderStage_t *st1, in
 	return qtrue;
 }
 
+#ifdef USE_PMLIGHT
+/*
+====================
+FindLightingStages
+
+Find proper stage for dlight pass
+====================
+*/
+static void FindLightingStages( void )
+{
+	const shaderStage_t *st;
+	int i;
+
+	shader.lightingStage = -1;
+
+	if ( !qglGenProgramsARB )
+		return;
+
+	if ( shader.isSky || ( shader.surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) || shader.sort == SS_ENVIRONMENT )
+		return;
+
+	for ( i = 0; i < shader.numUnfoggedPasses; i++ ) {
+		st = &stages[ i ];
+		if ( !st->active )
+			break;
+		if ( !st->bundle[0].isLightmap ) {
+			if ( st->bundle[0].tcGen != TCGEN_TEXTURE )
+				continue;
+			if ( (st->stateBits & GLS_BLEND_BITS) == (GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE) )
+				continue;
+			 // fix for q3wcp17' textures/scanctf2/bounce_white and others
+			if ( st->rgbGen == CGEN_IDENTITY && (st->stateBits & GLS_BLEND_BITS) == (GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO) ) {
+				if ( shader.lightingStage >= 0 ) {
+					continue;
+				}
+			}
+			shader.lightingStage = i;
+		}
+	}
+}
+#endif
+
 
 /*
 =============
@@ -2202,12 +2189,6 @@ static void FixRenderCommandList( int newShader ) {
 					}
 				}
 				curCmd = (const void *)(ds_cmd + 1);
-				break;
-				}
-			case RC_BIND_BUFFER:
-				{
-				const bindBufferCommand_t *db_cmd = (const bindBufferCommand_t *)curCmd;
-				curCmd = (const void *)(db_cmd + 1);
 				break;
 				}
 			case RC_DRAW_BUFFER:
@@ -2334,10 +2315,6 @@ static shader_t *GeneratePermanentShader( void ) {
 		}
 	}
 
-#ifdef USE_PMLIGHT
-	FindLightingStages( newShader );
-#endif
-
 	SortNewShader();
 
 	hash = generateHashValue(newShader->name, FILE_HASH_SIZE);
@@ -2346,52 +2323,6 @@ static shader_t *GeneratePermanentShader( void ) {
 
 	return newShader;
 }
-
-
-#ifdef USE_PMLIGHT
-/*
-====================
-FindLightingStages
-
-Find proper stage for dlight pass
-====================
-*/
-#define GLS_BLEND_BITS (GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)
-void FindLightingStages( shader_t *sh )
-{
-	shaderStage_t *st;
-	int i;
-
-	sh->lightingStage = -1;
-
-	if ( !qglGenProgramsARB )
-		return;
-
-	if ( sh->isSky || ( sh->surfaceFlags & (SURF_NODLIGHT | SURF_SKY) ) || sh->sort == SS_ENVIRONMENT )
-		return;
-
-	for ( i = 0; i < sh->numUnfoggedPasses; i++ ) {
-		st = sh->stages[ i ];
-		if ( !st )
-			break;
-		if ( !st->bundle[0].isLightmap ) {
-			if ( st->bundle[0].tcGen != TCGEN_TEXTURE )
-				continue;
-			if ( (st->stateBits & GLS_BLEND_BITS) == (GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE) )
-				continue;
-			 // fix for q3wcp17' textures/scanctf2/bounce_white and others
-			if ( st->rgbGen == CGEN_IDENTITY && (st->stateBits & GLS_BLEND_BITS) == (GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO) ) {
-				if ( sh->lightingStage >= 0 ) {
-					continue;
-				}
-			}
-			sh->lightingStage = i;
-		}
-	}
-}
-
-#undef GLS_BLEND_BITS
-#endif // USE_PMLIGHT
 
 
 /*
@@ -2517,6 +2448,49 @@ static void InitShader( const char *name, int lightmapIndex ) {
 
 	for ( i = 0 ; i < MAX_SHADER_STAGES ; i++ ) {
 		stages[i].bundle[0].texMods = texMods[i];
+	}
+}
+
+
+static void DetectNeeds( void )
+{
+	texCoordGen_t t1;
+	texCoordGen_t t2;
+	int i;
+
+	for ( i = 0; i < MAX_SHADER_STAGES; i++ )
+	{
+		if ( !stages[i].active )
+			break;
+
+		t1 = stages[i].bundle[0].tcGen;
+		t2 = stages[i].bundle[1].tcGen;
+
+		if ( t1 == TCGEN_LIGHTMAP || t2 == TCGEN_LIGHTMAP )
+		{
+			shader.needsST2 = qtrue;
+		}
+		if ( t1 == TCGEN_ENVIRONMENT_MAPPED || t1 == TCGEN_ENVIRONMENT_MAPPED_FP )
+		{
+			shader.needsNormal = qtrue;
+		}
+		if ( t2 == TCGEN_ENVIRONMENT_MAPPED || t2 == TCGEN_ENVIRONMENT_MAPPED_FP )
+		{
+			shader.needsNormal = qtrue;
+		}
+		if ( stages[i].alphaGen == AGEN_LIGHTING_SPECULAR || stages[i].rgbGen == CGEN_LIGHTING_DIFFUSE )
+		{
+			shader.needsNormal = qtrue;
+		}
+	}
+	for ( i = 0; i < shader.numDeforms; i++ )
+	{
+		if ( shader.deforms[i].deformation == DEFORM_WAVE || shader.deforms[i].deformation == DEFORM_NORMALS || shader.deforms[i].deformation == DEFORM_BULGE ) {
+			shader.needsNormal = qtrue;
+		}
+		if ( shader.deforms[i].deformation >= DEFORM_TEXT0 && shader.deforms[i].deformation <= DEFORM_TEXT7 ) {
+			shader.needsNormal = qtrue;
+		}
 	}
 }
 
@@ -2676,6 +2650,8 @@ static shader_t *FinishShader( void ) {
 		}
 	}
 
+	DetectNeeds();
+
 	// fix alphaGen flags to avoid redundant comparisons in R_ComputeColors()
 	for ( i = 0; i < MAX_SHADER_STAGES; i++ ) {
 		shaderStage_t *pStage = &stages[ i ];
@@ -2730,6 +2706,10 @@ static shader_t *FinishShader( void ) {
 	} else if ( shader.contentFlags & CONTENTS_FOG ) {
 		shader.fogPass = FP_LE;
 	}
+
+#ifdef USE_PMLIGHT
+	FindLightingStages();
+#endif
 
 	// determine which stage iterator function is appropriate
 	ComputeStageIteratorFunc();
@@ -2933,10 +2913,10 @@ shader_t *R_FindShader( const char *name, int lightmapIndex, qboolean mipRawImag
 	InitShader( strippedName, lightmapIndex );
 
 	// FIXME: set these "need" values apropriately
-	shader.needsNormal = qtrue;
-	shader.needsST1 = qtrue;
-	shader.needsST2 = qtrue;
-	shader.needsColor = qtrue;
+	//shader.needsNormal = qtrue;
+	//shader.needsST1 = qtrue;
+	//shader.needsST2 = qtrue;
+	//shader.needsColor = qtrue;
 
 	//
 	// attempt to define shader from an explicit parameter file
@@ -3022,10 +3002,10 @@ qhandle_t RE_RegisterShaderFromImage(const char *name, int lightmapIndex, image_
 	InitShader( name, lightmapIndex );
 
 	// FIXME: set these "need" values appropriately
-	shader.needsNormal = qtrue;
-	shader.needsST1 = qtrue;
-	shader.needsST2 = qtrue;
-	shader.needsColor = qtrue;
+	//shader.needsNormal = qtrue;
+	//shader.needsST1 = qtrue;
+	//shader.needsST2 = qtrue;
+	//shader.needsColor = qtrue;
 
 	//
 	// create the default shading commands
@@ -3190,13 +3170,7 @@ void	R_ShaderList_f (void) {
 		} else {
 			ri.Printf (PRINT_ALL, "  ");
 		}
-		if ( sh->multitextureEnv == GL_ADD ) {
-			ri.Printf( PRINT_ALL, "MT(a) " );
-		} else if ( sh->multitextureEnv == GL_MODULATE ) {
-			ri.Printf( PRINT_ALL, "MT(m) " );
-		} else if ( sh->multitextureEnv == GL_DECAL ) {
-			ri.Printf( PRINT_ALL, "MT(d) " );
-		} else if ( sh->multitextureEnv ) {
+		if ( sh->multitextureEnv ) {
 			ri.Printf( PRINT_ALL, "MT(x) " ); // TODO: per-stage statistics?
 		} else {
 			ri.Printf( PRINT_ALL, "      " );
@@ -3211,10 +3185,6 @@ void	R_ShaderList_f (void) {
 			ri.Printf( PRINT_ALL, "gen " );
 		} else if ( sh->optimalStageIteratorFunc == RB_StageIteratorSky ) {
 			ri.Printf( PRINT_ALL, "sky " );
-		} else if ( sh->optimalStageIteratorFunc == RB_StageIteratorLightmappedMultitexture ) {
-			ri.Printf( PRINT_ALL, "lmmt" );
-		} else if ( sh->optimalStageIteratorFunc == RB_StageIteratorVertexLitTexture ) {
-			ri.Printf( PRINT_ALL, "vlt " );
 		} else {
 			ri.Printf( PRINT_ALL, "    " );
 		}

@@ -28,6 +28,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAX_REAL_DLIGHTS	(MAX_DLIGHTS*2)
 #define MAX_LITSURFS		(MAX_DRAWSURFS)
 
+#define USE_TESS_NEEDS_NORMAL
+#define USE_TESS_NEEDS_ST2
+
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
@@ -37,7 +40,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "qgl.h"
 
 #define GL_INDEX_TYPE		GL_UNSIGNED_INT
-typedef unsigned int glIndex_t;
+
+typedef uint32_t glIndex_t;
 
 #define	REFENTITYNUM_BITS	12	// as we actually using only 1 bit for dlight mask in opengl1 renderer
 #define	REFENTITYNUM_MASK	((1<<REFENTITYNUM_BITS) - 1)
@@ -313,15 +317,15 @@ typedef struct {
 	qboolean		isDetail;
 	qboolean		depthFragment;
 
+	short			vboVPindex;			// combined fog programs
+	short			vboFPindex;			// combined fog programs
+	
+	uint32_t		color_offset;		// within current shader
+	uint32_t		tex_offset[2];		// within current shader
+
 } shaderStage_t;
 
 struct shaderCommands_s;
-
-typedef enum {
-	CT_FRONT_SIDED,
-	CT_BACK_SIDED,
-	CT_TWO_SIDED
-} cullType_t;
 
 typedef enum {
 	FP_NONE,		// surface is translucent and will just be adjusted properly
@@ -381,9 +385,9 @@ typedef struct shader_s {
 	fogPass_t	fogPass;				// draw a blended pass, possibly with depth test equals
 
 	qboolean	needsNormal;			// not all shaders will need all data to be gathered
-	qboolean	needsST1;
+	//qboolean	needsST1;
 	qboolean	needsST2;
-	qboolean	needsColor;
+	//qboolean	needsColor;
 
 	int			numDeforms;
 	deformStage_t	deforms[MAX_SHADER_DEFORMS];
@@ -396,9 +400,16 @@ typedef struct shader_s {
 	int			lightingStage;
 #endif
 	qboolean	isStaticShader;
-	short		vboVPindex;
-	short		vboFPindex;
-	qboolean	hasScreenMap;
+	int			svarsSize;
+	int			iboOffset;
+	int			vboOffset;
+	int			normalOffset;
+	int			numIndexes;
+	int			numVertexes;
+	int			curVertexes;
+	int			curIndexes;
+
+	int			hasScreenMap;
 
 	float		lightmapOffset[2];	// within merged lightmap
 
@@ -515,7 +526,7 @@ typedef struct {
 	int			scissorX, scissorY, scissorWidth, scissorHeight;
 	float		fovX, fovY;
 	float		projectionMatrix[16];
-	cplane_t	frustum[4];
+	cplane_t	frustum[5];
 	vec3_t		visBounds[2];
 	float		zFar;
 	stereoFrame_t	stereoFrame;
@@ -924,8 +935,6 @@ typedef struct {
 #define FUNCTABLE_SIZE2		10
 #define FUNCTABLE_MASK		(FUNCTABLE_SIZE-1)
 
-#define MAX_TEXTURE_UNITS	8
-
 // the renderer front end should never modify glstate_t
 typedef struct {
 	GLuint		currenttextures[ MAX_TEXTURE_UNITS ];
@@ -933,7 +942,9 @@ typedef struct {
 	qboolean	finishCalled;
 	GLint		texEnv[2];
 	cullType_t	faceCulling;
-	unsigned long	glStateBits;
+	unsigned	glStateBits;
+	unsigned	glClientStateBits[ MAX_TEXTURE_UNITS ];
+	int			currentArray;
 } glstate_t;
 
 typedef struct {
@@ -988,7 +999,6 @@ typedef struct {
 
 	qboolean	projection2D;	// if qtrue, drawstretchpic doesn't need to change modes
 	byte		color2D[4];
-	qboolean	vertexes2D;		// shader needs to be finished
 	qboolean	doneBloom;		// done bloom this frame
 	qboolean	doneSurfaces;   // done any 3d surfaces already
 	trRefEntity_t	entity2D;	// currentEntity will point at this when doing 2D rendering
@@ -1117,6 +1127,8 @@ typedef struct {
 extern backEndState_t	backEnd;
 extern trGlobals_t	tr;
 
+extern int					gl_clamp_mode;
+
 extern glstate_t	glState;		// outside of TR since it shouldn't be cleared during ref re-init
 
 	// unmodified width/height according to actual \r_mode*
@@ -1133,15 +1145,11 @@ extern	qboolean			superSampled;
 //
 extern cvar_t	*r_flareSize;
 extern cvar_t	*r_flareFade;
-// coefficient for the flare intensity falloff function.
-#define FLARE_STDCOEFF "150"
-extern cvar_t	*r_flareCoeff;
+extern cvar_t	*r_flareCoeff;			// coefficient for the flare intensity falloff function. 
 
 extern cvar_t	*r_railWidth;
 extern cvar_t	*r_railCoreWidth;
 extern cvar_t	*r_railSegmentLength;
-
-extern cvar_t	*r_ignoreFastPath;		// allows us to ignore our Tess fast paths
 
 extern cvar_t	*r_znear;				// near Z clip plane
 extern cvar_t	*r_zproj;				// z distance of projection plane
@@ -1149,11 +1157,6 @@ extern cvar_t	*r_stereoSeparation;			// separation of cameras for stereo renderi
 
 extern cvar_t	*r_lodbias;				// push/pull LOD transitions
 extern cvar_t	*r_lodscale;
-
-extern cvar_t	*r_primitives;			// "0" = based on compiled vertex array existance
-										// "1" = glDrawElemet tristrips
-										// "2" = glDrawElements triangles
-										// "-1" = no drawing
 
 extern cvar_t	*r_fastsky;				// controls whether sky should be cleared or drawn
 extern cvar_t	*r_neatsky;				// nomip and nopicmip for skyboxes, cnq3 like look
@@ -1298,7 +1301,8 @@ void	GL_SelectTexture( int unit );
 void	GL_BindTexture( int unit, GLuint texnum );
 void	GL_TextureMode( const char *string );
 void	GL_CheckErrors( void );
-void	GL_State( unsigned long stateVector );
+void	GL_State( unsigned stateVector );
+void	GL_ClientState( int unit, unsigned stateVector );
 void	GL_TexEnv( GLint env );
 void	GL_Cull( cullType_t cullType );
 
@@ -1323,19 +1327,28 @@ void	GL_Cull( cullType_t cullType );
 #define GLS_DSTBLEND_ONE_MINUS_DST_ALPHA		0x00000080
 #define GLS_DSTBLEND_BITS						0x000000f0
 
+#define GLS_BLEND_BITS							(GLS_SRCBLEND_BITS | GLS_DSTBLEND_BITS)
+
 #define GLS_DEPTHMASK_TRUE						0x00000100
 
-#define GLS_POLYMODE_LINE						0x00001000
+#define GLS_POLYMODE_LINE						0x00000200
 
-#define GLS_DEPTHTEST_DISABLE					0x00010000
-#define GLS_DEPTHFUNC_EQUAL						0x00020000
+#define GLS_DEPTHTEST_DISABLE					0x00000400
+#define GLS_DEPTHFUNC_EQUAL						0x00000800
 
-#define GLS_ATEST_GT_0							0x10000000
-#define GLS_ATEST_LT_80							0x20000000
-#define GLS_ATEST_GE_80							0x30000000
-#define GLS_ATEST_BITS							0x30000000
+#define GLS_ATEST_GT_0							0x00001000
+#define GLS_ATEST_LT_80							0x00002000
+#define GLS_ATEST_GE_80							0x00003000
+#define GLS_ATEST_BITS							0x00003000
 
-#define GLS_DEFAULT			GLS_DEPTHMASK_TRUE
+#define GLS_DEFAULT								GLS_DEPTHMASK_TRUE
+
+// vertex array states
+
+#define CLS_NONE								0x00000000
+#define CLS_COLOR_ARRAY							0x00000001
+#define CLS_TEXCOORD_ARRAY						0x00000002
+#define CLS_NORMAL_ARRAY						0x00000004
 
 void	RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty);
 void	RE_UploadCinematic (int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty);
@@ -1381,7 +1394,6 @@ shader_t	*R_FindShaderByName( const char *name );
 void		R_InitShaders( void );
 void		R_ShaderList_f( void );
 void		RE_RemapShader(const char *oldShader, const char *newShader, const char *timeOffset);
-void		FindLightingStages( shader_t *sh );
 
 
 //
@@ -1402,15 +1414,17 @@ typedef struct stageVars
 {
 	color4ub_t	colors[SHADER_MAX_VERTEXES];
 	vec2_t		texcoords[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES];
+	vec2_t		*texcoordPtr[2];
 } stageVars_t;
 
 typedef struct shaderCommands_s 
 {
 #pragma pack(push,16)
 	glIndex_t	indexes[SHADER_MAX_INDEXES] QALIGN(16);
-	vec4_t		xyz[SHADER_MAX_VERTEXES] QALIGN(16);
+	vec4_t		xyz[SHADER_MAX_VERTEXES*2] QALIGN(16); // 2x needed for shadows
 	vec4_t		normal[SHADER_MAX_VERTEXES] QALIGN(16);
-	vec2_t		texCoords[SHADER_MAX_VERTEXES][2] QALIGN(16);
+	vec2_t		texCoords[2][SHADER_MAX_VERTEXES] QALIGN(16);
+	vec2_t		texCoords00[SHADER_MAX_VERTEXES] QALIGN(16);
 	color4ub_t	vertexColors[SHADER_MAX_VERTEXES] QALIGN(16);
 #ifdef USE_LEGACY_DLIGHTS
 	int			vertexDlightBits[SHADER_MAX_VERTEXES] QALIGN(16);
@@ -1440,6 +1454,13 @@ typedef struct shaderCommands_s
 #endif
 
 	// info extracted from current shader
+#ifdef USE_TESS_NEEDS_NORMAL
+	int			needsNormal;
+#endif
+#ifdef USE_TESS_NEEDS_ST2
+	int			needsST2;
+#endif
+
 	int			numPasses;
 	shaderStage_t **xstages;
 
@@ -1454,8 +1475,6 @@ void RB_CheckOverflow( int verts, int indexes );
 
 void RB_StageIteratorGeneric( void );
 void RB_StageIteratorSky( void );
-void RB_StageIteratorVertexLitTexture( void );
-void RB_StageIteratorLightmappedMultitexture( void );
 
 void RB_AddQuadStamp( const vec3_t origin, const vec3_t left, const vec3_t up, const byte *color );
 void RB_AddQuadStampExt( const vec3_t origin, const vec3_t left, const vec3_t up, const byte *color, float s1, float t1, float s2, float t2 );
@@ -1511,7 +1530,7 @@ qboolean R_LightCullBounds( const dlight_t* dl, const vec3_t mins, const vec3_t 
 void R_BindAnimatedImage( const textureBundle_t *bundle );
 void R_DrawElements( int numIndexes, const glIndex_t *indexes );
 void R_ComputeColors( const shaderStage_t *pStage );
-void R_ComputeTexCoords( const shaderStage_t *pStage );
+void R_ComputeTexCoords( const int b, const textureBundle_t *bundle );
 
 void QGL_InitARB( void );
 void QGL_DoneARB( void );
@@ -1656,11 +1675,11 @@ void	RB_CalcEnvironmentTexCoords( float *dstTexCoords );
 void	RB_CalcEnvironmentTexCoordsFP( float *dstTexCoords, qboolean screenMap );
 void	RB_CalcFogTexCoords( float *dstTexCoords );
 const fogProgramParms_t *RB_CalcFogProgramParms( void );
-void	RB_CalcScrollTexCoords( const float scroll[2], float *dstTexCoords );
-void	RB_CalcRotateTexCoords( float rotSpeed, float *dstTexCoords );
-void	RB_CalcScaleTexCoords( const float scale[2], float *dstTexCoords );
-void	RB_CalcTurbulentTexCoords( const waveForm_t *wf, float *dstTexCoords );
-void	RB_CalcTransformTexCoords( const texModInfo_t *tmi, float *dstTexCoords );
+void	RB_CalcScrollTexCoords( const float scroll[2], float *srcTexCoords, float *dstTexCoords );
+void	RB_CalcRotateTexCoords( float rotSpeed, float *srcTexCoords, float *dstTexCoords );
+void	RB_CalcScaleTexCoords( const float scale[2], float *srcTexCoords, float *dstTexCoords );
+void	RB_CalcTurbulentTexCoords( const waveForm_t *wf, float *srcTexCoords, float *dstTexCoords );
+void	RB_CalcTransformTexCoords( const texModInfo_t *tmi, float *srcTexCoords, float *dstTexCoords );
 void	RB_CalcModulateColorsByFog( unsigned char *dstColors );
 void	RB_CalcModulateAlphasByFog( unsigned char *dstColors );
 void	RB_CalcModulateRGBAsByFog( unsigned char *dstColors );
@@ -1668,7 +1687,7 @@ void	RB_CalcWaveAlpha( const waveForm_t *wf, unsigned char *dstColors );
 void	RB_CalcWaveColor( const waveForm_t *wf, unsigned char *dstColors );
 void	RB_CalcAlphaFromEntity( unsigned char *dstColors );
 void	RB_CalcAlphaFromOneMinusEntity( unsigned char *dstColors );
-void	RB_CalcStretchTexCoords( const waveForm_t *wf, float *texCoords );
+void	RB_CalcStretchTexCoords( const waveForm_t *wf, float *srcTexCoords, float *dstTexCoords );
 void	RB_CalcColorFromEntity( unsigned char *dstColors );
 void	RB_CalcColorFromOneMinusEntity( unsigned char *dstColors );
 void	RB_CalcSpecularAlpha( unsigned char *alphas );
@@ -1708,10 +1727,6 @@ typedef struct {
 	int		commandId;
 	int		buffer;
 } drawBufferCommand_t;
-
-typedef struct {
-	int		commandId;
-} bindBufferCommand_t;
 
 typedef struct {
 	int		commandId;
@@ -1771,7 +1786,6 @@ typedef enum {
 	RC_SET_COLOR,
 	RC_STRETCH_PIC,
 	RC_DRAW_SURFS,
-	RC_BIND_BUFFER,
 	RC_DRAW_BUFFER,
 	RC_SWAP_BUFFERS,
 	RC_FINISHBLOOM,

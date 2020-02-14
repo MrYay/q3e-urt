@@ -355,7 +355,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 	for ( offs = 0, i = 0 ; i < tr.numLightmaps; i++ ) {
 
 		tr.lightmaps[ i ] = R_CreateImage( va( "*mergedLightmap%d", i ), NULL,
-			lightmapWidth, lightmapHeight, lightmapFlags | IMGFLAG_CLAMPTOBORDER | IMGFLAG_LIGHTMAP );
+			lightmapWidth, lightmapHeight, lightmapFlags | IMGFLAG_CLAMPTOBORDER );
 
 		for ( y = 0; y < lightmapCountY; y++ ) {
 			if ( offs >= len )
@@ -370,7 +370,7 @@ static void R_LoadMergedLightmaps( const lump_t *l, byte *image )
 #ifdef USE_VULKAN
 				vk_upload_image_data( tr.lightmaps[ i ]->handle, x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, qfalse, image, 4 );
 #else
-				//R_UploadSubImage( image, x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, tr.lightmaps[ i ] );
+				R_UploadSubImage( image, x * LIGHTMAP_LEN, y * LIGHTMAP_LEN, LIGHTMAP_LEN, LIGHTMAP_LEN, tr.lightmaps[ i ] );
 #endif
 
 				offs += LIGHTMAP_SIZE * LIGHTMAP_SIZE * 3;
