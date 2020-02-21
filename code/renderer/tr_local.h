@@ -29,7 +29,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define MAX_LITSURFS		(MAX_DRAWSURFS)
 
 #define USE_TESS_NEEDS_NORMAL
-#define USE_TESS_NEEDS_ST2
+//#define USE_TESS_NEEDS_ST2
 
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qfiles.h"
@@ -317,11 +317,13 @@ typedef struct {
 	qboolean		isDetail;
 	qboolean		depthFragment;
 
-	short			vboVPindex;			// combined fog programs
-	short			vboFPindex;			// combined fog programs
+	short			vboVPindex[3];		// normal, eye-in, eye-out
+	short			vboFPindex[2];		// normal, fog-blend
 	
 	uint32_t		color_offset;		// within current shader
 	uint32_t		tex_offset[2];		// within current shader
+
+	qboolean		needViewPos;
 
 } shaderStage_t;
 
@@ -1350,8 +1352,8 @@ void	GL_Cull( cullType_t cullType );
 #define CLS_TEXCOORD_ARRAY						0x00000002
 #define CLS_NORMAL_ARRAY						0x00000004
 
-void	RE_StretchRaw (int x, int y, int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty);
-void	RE_UploadCinematic (int w, int h, int cols, int rows, const byte *data, int client, qboolean dirty);
+void		RE_StretchRaw( int x, int y, int w, int h, int cols, int rows, byte *data, int client, qboolean dirty );
+void		RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int client, qboolean dirty );
 
 void		RE_BeginFrame( stereoFrame_t stereoFrame );
 void		RE_BeginRegistration( glconfig_t *glconfig );
