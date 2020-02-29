@@ -33,7 +33,24 @@ static const float s_flipMatrix[16] = {
 	0, 1, 0, 0,
 	0, 0, 0, 1
 };
+
+
+const float *GL_Ortho( const float left, const float right, const float bottom, const float top, const float znear, const float zfar )
+{
+	static float m[ 16 ] = { 0 };
+
+	m[0] = 2.0f / (right - left);
+	m[5] = 2.0f / (top - bottom);
+	m[10] = - 2.0f / (zfar - znear);
+	m[12] = - (right + left)/(right - left);
+	m[13] = - (top + bottom) / (top - bottom);
+	m[14] = - (zfar + znear) / (zfar - znear);
+	m[15] = 1.0f;
+
+	return m;
+}
 #endif
+
 
 /*
 ** GL_Bind
@@ -568,7 +585,7 @@ static void RB_BeginDrawingView( void ) {
 }
 
 #ifdef USE_PMLIGHT
-static void RB_LightingPass( qboolean skipWeapon );
+static void RB_LightingPass( void );
 #endif
 
 /*
@@ -576,7 +593,7 @@ static void RB_LightingPass( qboolean skipWeapon );
 RB_RenderDrawSurfList
 ==================
 */
-static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs, qboolean skipWeapon ) {
+static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs ) {
 	shader_t		*shader, *oldShader;
 	int				fogNum;
 	int				entityNum, oldEntityNum;
@@ -616,11 +633,11 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs, qboo
 		}
 
 		R_DecomposeSort( drawSurf->sort, &entityNum, &shader, &fogNum, &dlighted );
-
-		if ( skipWeapon && entityNum != REFENTITYNUM_WORLD && backEnd.refdef.entities[ entityNum ].e.renderfx & RF_DEPTHHACK ) {
+#ifdef USE_VULKAN
+		if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP && entityNum != REFENTITYNUM_WORLD && backEnd.refdef.entities[ entityNum ].e.renderfx & RF_DEPTHHACK ) {
 			continue;
 		}
-
+#endif
 		//
 		// change the tess parameters if needed
 		// a "entityMergable" shader is a shader that can have surfaces from seperate
@@ -634,7 +651,7 @@ static void RB_RenderDrawSurfList( drawSurf_t *drawSurfs, int numDrawSurfs, qboo
 			if ( backEnd.refdef.numLitSurfs && oldShaderSort < INSERT_POINT && shader->sort >= INSERT_POINT ) {
 				//RB_BeginDrawingLitSurfs(); // no need, already setup in RB_BeginDrawingView()
 #ifdef USE_VULKAN
-				RB_LightingPass( skipWeapon );
+				RB_LightingPass();
 #else
 				if ( depthRange ) {
 					qglDepthRange( 0, 1 );
@@ -843,7 +860,7 @@ static void RB_BeginDrawingLitSurfs( void )
 RB_RenderLitSurfList
 ==================
 */
-static void RB_RenderLitSurfList( dlight_t* dl, qboolean skipWeapon ) {
+static void RB_RenderLitSurfList( dlight_t* dl ) {
 	shader_t		*shader, *oldShader;
 	int				fogNum;
 	int				entityNum, oldEntityNum;
@@ -880,11 +897,11 @@ static void RB_RenderLitSurfList( dlight_t* dl, qboolean skipWeapon ) {
 		}
 
 		R_DecomposeLitSort( litSurf->sort, &entityNum, &shader, &fogNum );
-
-		if ( skipWeapon && entityNum != REFENTITYNUM_WORLD && backEnd.refdef.entities[ entityNum ].e.renderfx & RF_DEPTHHACK ) {
+#ifdef USE_VULKAN
+		if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP && entityNum != REFENTITYNUM_WORLD && backEnd.refdef.entities[ entityNum ].e.renderfx & RF_DEPTHHACK ) {
 			continue;
 		}
-
+#endif
 		// anything BEFORE opaque is sky/portal, anything AFTER it should never have been added
 		//assert( shader->sort == SS_OPAQUE );
 		// !!! but MIRRORS can trip that assert, so just do this for now
@@ -1057,8 +1074,7 @@ static void RB_SetGL2D( void ) {
 	qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 	qglMatrixMode( GL_PROJECTION );
-	qglLoadIdentity();
-	qglOrtho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 );
+	qglLoadMatrixf( GL_Ortho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 ) );
 	qglMatrixMode( GL_MODELVIEW );
 	qglLoadIdentity();
 
@@ -1124,7 +1140,7 @@ void RE_UploadCinematic( int w, int h, int cols, int rows, byte *data, int clien
 	image_t *image;
 
 	if ( !tr.scratchImage[ client ] ) {
-		tr.scratchImage[ client ] = R_CreateImage( va( "*scratch%i", client ), data, cols, rows, IMGFLAG_CLAMPTOEDGE | IMGFLAG_RGB | IMGFLAG_NOSCALE );
+		tr.scratchImage[ client ] = R_CreateImage( va( "*scratch%i", client ), NULL, data, cols, rows, IMGFLAG_CLAMPTOEDGE | IMGFLAG_RGB | IMGFLAG_NOSCALE );
 	}
 
 	image = tr.scratchImage[ client ];
@@ -1259,7 +1275,7 @@ static const void *RB_StretchPic( const void *data ) {
 
 
 #ifdef USE_PMLIGHT
-static void RB_LightingPass( qboolean skipWeapon )
+static void RB_LightingPass( void )
 {
 	dlight_t	*dl;
 	int	i;
@@ -1277,7 +1293,7 @@ static void RB_LightingPass( qboolean skipWeapon )
 		if ( dl->head )
 		{
 			tess.light = dl;
-			RB_RenderLitSurfList( dl, skipWeapon );
+			RB_RenderLitSurfList( dl );
 		}
 	}
 
@@ -1288,15 +1304,13 @@ static void RB_LightingPass( qboolean skipWeapon )
 #endif
 
 
-#ifdef USE_VULKAN
 static void transform_to_eye_space( const vec3_t v, vec3_t v_eye )
 {
-	const float *m = vk_world.modelview_transform;
+	const float *m = backEnd.viewParms.world.modelMatrix;
 	v_eye[0] = m[0]*v[0] + m[4]*v[1] + m[8 ]*v[2] + m[12];
 	v_eye[1] = m[1]*v[0] + m[5]*v[1] + m[9 ]*v[2] + m[13];
 	v_eye[2] = m[2]*v[0] + m[6]*v[1] + m[10]*v[2] + m[14];
 };
-#endif
 
 
 /*
@@ -1305,7 +1319,6 @@ RB_DebugPolygon
 ================
 */
 static void RB_DebugPolygon( int color, int numPoints, float *points ) {
-#ifdef USE_VULKAN
 	vec3_t pa;
 	vec3_t pb;
 	vec3_t p;
@@ -1313,8 +1326,9 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	vec3_t n;
 	int i;
 
-	if ( numPoints < 3 )
+	if ( numPoints < 3 ) {
 		return;
+	}
 
 	transform_to_eye_space( &points[0], pa );
 	transform_to_eye_space( &points[3], pb );
@@ -1329,10 +1343,11 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 		}
 	}
 
-	if ( DotProduct(n, pa) >= 0 ) {
+	if ( DotProduct( n, pa ) >= 0 ) {
 		return; // discard backfacing polygon
 	}
 
+#ifdef USE_VULKAN
 	// Solid shade.
 	for (i = 0; i < numPoints; i++) {
 		VectorCopy(&points[3*i], tess.xyz[i]);
@@ -1369,29 +1384,24 @@ static void RB_DebugPolygon( int color, int numPoints, float *points ) {
 	vk_draw_geometry( vk.surface_debug_pipeline_outline, DEPTH_RANGE_ZERO, qfalse );
 	tess.numVertexes = 0;
 #else
-	int		i;
+	GL_SelectTexture( 0 );
+	qglDisable( GL_TEXTURE_2D );
 
-	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	GL_ClientState( 0, CLS_NONE );
+	qglVertexPointer( 3, GL_FLOAT, 0, points );
 
 	// draw solid shade
-
-	qglColor3f( color&1, (color>>1)&1, (color>>2)&1 );
-	qglBegin( GL_POLYGON );
-	for ( i = 0 ; i < numPoints ; i++ ) {
-		qglVertex3fv( points + i * 3 );
-	}
-	qglEnd();
+	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
+	qglColor4f( color&1, (color>>1)&1, (color>>2)&1, 1 );
+	qglDrawArrays( GL_TRIANGLE_FAN, 0, numPoints );
 
 	// draw wireframe outline
-	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE );
 	qglDepthRange( 0, 0 );
-	qglColor3f( 1, 1, 1 );
-	qglBegin( GL_POLYGON );
-	for ( i = 0 ; i < numPoints ; i++ ) {
-		qglVertex3fv( points + i * 3 );
-	}
-	qglEnd();
+	qglColor4f( 1, 1, 1, 1 );
+	qglDrawArrays( GL_LINE_LOOP, 0, numPoints );
 	qglDepthRange( 0, 1 );
+
+	qglEnable( GL_TEXTURE_2D );
 #endif
 }
 
@@ -1426,7 +1436,6 @@ RB_DrawSurfs
 */
 static const void *RB_DrawSurfs( const void *data ) {
 	const drawSurfsCommand_t *cmd;
-	qboolean skipWeapon;
 
 	// finish any 2D drawing if needed
 	RB_EndSurface();
@@ -1435,8 +1444,6 @@ static const void *RB_DrawSurfs( const void *data ) {
 
 	backEnd.refdef = cmd->refdef;
 	backEnd.viewParms = cmd->viewParms;
-
-	skipWeapon = (vk.renderPassIndex == RENDER_PASS_SCREENMAP) ? qtrue : qfalse;
 
 __redraw:
 
@@ -1447,7 +1454,7 @@ __redraw:
 	// clear the z buffer, set the modelview, etc
 	RB_BeginDrawingView();
 
-	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs, skipWeapon );
+	RB_RenderDrawSurfList( cmd->drawSurfs, cmd->numDrawSurfs );
 
 #ifdef USE_VBO
 	VBO_UnBind();
@@ -1466,21 +1473,22 @@ __redraw:
 #ifdef USE_PMLIGHT
 	if ( backEnd.refdef.numLitSurfs ) {
 		RB_BeginDrawingLitSurfs();
-		RB_LightingPass( skipWeapon );
+		RB_LightingPass();
 	}
 #endif
 
-	if ( skipWeapon ) {
+#ifdef USE_VULKAN
+	if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP ) {
 		vk_end_render_pass();
 		vk_begin_main_render_pass();
 
 		backEnd.refdef = cmd->refdef;
 		backEnd.viewParms = cmd->viewParms;
-
-		skipWeapon = qfalse;
+		backEnd.screenMapDone = qtrue;
 
 		goto __redraw;
 	}
+#endif
 
 	// draw main system development information (surface outlines, etc)
 	RB_DebugGraphics();
@@ -1551,7 +1559,7 @@ void RB_ShowImages( void )
 
 	vk_clear_color( colorBlack );
 
-	for (i = 0 ; i < tr.numImages ; i++) {
+	for ( i = 0; i < tr.numImages; i++ ) {
 		image_t *image = tr.images[i];
 
 		float w = glConfig.vidWidth / 20;
@@ -1567,17 +1575,9 @@ void RB_ShowImages( void )
 
 		GL_Bind( image );
 
-		Com_Memset( tess.svars.colors, tr.identityLightByte, tess.numVertexes * sizeof( tess.svars.colors[0] ) );
+		Com_Memset( tess.svars.colors, 255, 4 * sizeof( tess.svars.colors[0] ) );
 
-		tess.numIndexes = 6;
 		tess.numVertexes = 4;
-
-		tess.indexes[0] = 0;
-		tess.indexes[1] = 1;
-		tess.indexes[2] = 2;
-		tess.indexes[3] = 0;
-		tess.indexes[4] = 2;
-		tess.indexes[5] = 3;
 
 		tess.xyz[0][0] = x;
 		tess.xyz[0][1] = y;
@@ -1589,20 +1589,20 @@ void RB_ShowImages( void )
 		tess.svars.texcoords[0][1][0] = 1;
 		tess.svars.texcoords[0][1][1] = 0;
 
-		tess.xyz[2][0] = x + w;
+		tess.xyz[2][0] = x;
 		tess.xyz[2][1] = y + h;
-		tess.svars.texcoords[0][2][0] = 1;
+		tess.svars.texcoords[0][2][0] = 0;
 		tess.svars.texcoords[0][2][1] = 1;
 
-		tess.xyz[3][0] = x;
+		tess.xyz[3][0] = x + w;
 		tess.xyz[3][1] = y + h;
-		tess.svars.texcoords[0][3][0] = 0;
+		tess.svars.texcoords[0][3][0] = 1;
 		tess.svars.texcoords[0][3][1] = 1;
 
 		tess.svars.texcoordPtr[0] = tess.svars.texcoords[0];
 
-		vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA | TESS_ST0 );
-		vk_draw_geometry( vk.images_debug_pipeline, DEPTH_RANGE_NORMAL, qtrue );
+		vk_bind_geometry_ext( TESS_XYZ | TESS_RGBA | TESS_ST0 );
+		vk_draw_geometry( vk.images_debug_pipeline, DEPTH_RANGE_NORMAL, qfalse );
 	}
 
 	tess.numIndexes = 0;
@@ -1614,6 +1614,8 @@ void RB_ShowImages( void ) {
 	image_t	*image;
 	float	x, y, w, h;
 	int		start, end;
+	const vec2_t t[4] = { {0,0}, {1,0}, {0,1}, {1,1} };
+	vec3_t v[4];
 
 	if ( !backEnd.projection2D ) {
 		RB_SetGL2D();
@@ -1622,6 +1624,9 @@ void RB_ShowImages( void ) {
 	qglClear( GL_COLOR_BUFFER_BIT );
 
 	qglFinish();
+
+	GL_ClientState( 0, CLS_TEXCOORD_ARRAY );
+	qglTexCoordPointer( 2, GL_FLOAT, 0, t );
 
 	start = ri.Milliseconds();
 
@@ -1639,16 +1644,14 @@ void RB_ShowImages( void ) {
 		}
 
 		GL_Bind( image );
-		qglBegin (GL_QUADS);
-		qglTexCoord2f( 0, 0 );
-		qglVertex2f( x, y );
-		qglTexCoord2f( 1, 0 );
-		qglVertex2f( x + w, y );
-		qglTexCoord2f( 1, 1 );
-		qglVertex2f( x + w, y + h );
-		qglTexCoord2f( 0, 1 );
-		qglVertex2f( x, y + h );
-		qglEnd();
+
+		VectorSet(v[0],x,y,0);
+		VectorSet(v[1],x+w,y,0);
+		VectorSet(v[2],x,y+h,0);
+		VectorSet(v[3],x+w,y+h,0);
+
+		qglVertexPointer( 3, GL_FLOAT, 0, v );
+		qglDrawArrays( GL_TRIANGLE_STRIP, 0, 4 );
 	}
 
 	qglFinish();
@@ -1688,10 +1691,6 @@ static const void *RB_ClearDepth( const void *data )
 	
 	RB_EndSurface();
 
-	// texture swapping test
-	//if ( r_showImages->integer )
-	//	RB_ShowImages();
-
 #ifdef USE_VULKAN
 	vk_clear_depth( r_shadows->integer == 2 ? qtrue : qfalse );
 #else
@@ -1710,8 +1709,6 @@ RB_ClearColor
 static const void *RB_ClearColor( const void *data )
 {
 	const clearColorCommand_t *cmd = data;
-
-
 
 #ifdef USE_VULKAN
 	backEnd.projection2D = qtrue;
@@ -1739,6 +1736,11 @@ static const void *RB_FinishBloom( const void *data )
 
 	RB_EndSurface();
 
+	// texture swapping test
+	if ( r_showImages->integer ) {
+		RB_ShowImages();
+	}
+
 	backEnd.drawConsole = qtrue;
 
 	return (const void *)(cmd + 1);
@@ -1752,12 +1754,12 @@ static const void *RB_SwapBuffers( const void *data ) {
 	// finish any 2D drawing if needed
 	RB_EndSurface();
 
-	cmd = (const swapBuffersCommand_t *)data;
-
 	// texture swapping test
-	if ( r_showImages->integer ) {
+	if ( r_showImages->integer && !backEnd.drawConsole ) {
 		RB_ShowImages();
 	}
+
+	cmd = (const swapBuffersCommand_t *)data;
 
 	tr.needScreenMap = 0;
 

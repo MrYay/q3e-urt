@@ -43,6 +43,13 @@ typedef enum {
 } Vk_Shadow_Phase;
 
 typedef enum {
+	TRIANGLE_LIST = 0,
+	TRIANGLE_STRIP,
+	LINE_LIST,
+	POINT_LIST
+} Vk_Primitive_Topology;
+
+typedef enum {
 	DEPTH_RANGE_NORMAL, // [0..1]
 	DEPTH_RANGE_ZERO, // [0..0]
 	DEPTH_RANGE_ONE, // [1..1]
@@ -59,8 +66,8 @@ typedef struct {
 } Vk_Sampler_Def;
 
 enum {
+	RENDER_PASS_SCREENMAP = 0,
 	RENDER_PASS_MAIN,
-	RENDER_PASS_SCREENMAP,
 	RENDER_PASS_COUNT
 };
 
@@ -71,10 +78,11 @@ typedef struct {
 	qboolean polygon_offset;
 	qboolean clipping_plane;
 	qboolean mirror;
-	qboolean line_primitives;
 	Vk_Shadow_Phase shadow_phase;
+	Vk_Primitive_Topology primitives;
 	int fog_stage; // off, fog-in / fog-out
 	int line_width;
+	int abs_light;
 } Vk_Pipeline_Def;
 
 typedef struct VK_Pipeline {
@@ -213,6 +221,7 @@ typedef struct vk_tess_s {
 	} descriptor_set;
 
 	Vk_Depth_Range depth_range;
+	VkPipeline last_pipeline;
 
 #ifndef USE_SINGLE_FBO
 	VkDescriptorSet color_descriptor;
@@ -425,10 +434,10 @@ typedef struct {
 	// dim 2 is a polygon offset value (0 - off, 1 - on).
 	uint32_t dlight_pipelines[2][3][2];
 
-	// clippingPlane[2], cullType[3], polygonOffset[2], fogStage[3]
+	// clippingPlane[2], cullType[3], polygonOffset[2], fogStage[2], absLight[2]
 #ifdef USE_PMLIGHT
-	uint32_t dlight_pipelines_x[2][3][2][2];
-	uint32_t dlight1_pipelines_x[2][3][2][2];
+	uint32_t dlight_pipelines_x[2][3][2][2][2];
+	uint32_t dlight1_pipelines_x[2][3][2][2][2];
 #endif
 
 	// debug visualization pipelines
@@ -488,6 +497,8 @@ typedef struct {
 	uint32_t screenMapWidth;
 	uint32_t screenMapHeight;
 	uint32_t screenMapSamples;
+
+	uint32_t image_chunk_size;
 
 } Vk_Instance;
 

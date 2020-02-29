@@ -320,7 +320,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[0].format = vk.surface_format.format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
-		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for next render pass
+		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for presentation
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -332,7 +332,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[0].flags = 0;
 		attachments[0].format = vk.color_format;
 		attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
-		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // Assuming this will be completely overwritten
+		attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;	// Assuming this will be completely overwritten
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // needed for next render pass
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -382,7 +382,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[2].samples = vkSamples;
 		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
-		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[2].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		attachments[2].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -438,12 +438,12 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorRef0;
 
-	// presentation
+	// gamma post-processing
 	attachments[0].flags = 0;
 	attachments[0].format = vk.surface_format.format;
 	attachments[0].samples = VK_SAMPLE_COUNT_1_BIT;
 	attachments[0].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // needed for presentation
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
@@ -562,19 +562,20 @@ static void allocate_and_bind_image_memory(VkImage image) {
 
 	qvkGetImageMemoryRequirements(vk.device, image, &memory_requirements);
 
-	if (memory_requirements.size > IMAGE_CHUNK_SIZE) {
-		ri.Error(ERR_FATAL, "Vulkan: could not allocate memory, image is too large.");
+	if ( memory_requirements.size > vk.image_chunk_size ) {
+		ri.Error( ERR_FATAL, "Vulkan: could not allocate memory, image is too large (%ikbytes).",
+			(int)(memory_requirements.size/1024) );
 	}
 
 	chunk = NULL;
 
 	// Try to find an existing chunk of sufficient capacity.
 	alignment = memory_requirements.alignment;
-	for (i = 0; i < vk_world.num_image_chunks; i++) {
+	for ( i = 0; i < vk_world.num_image_chunks; i++ ) {
 		// ensure that memory region has proper alignment
 		VkDeviceSize offset = PAD( vk_world.image_chunks[i].used, alignment );
 
-		if ( offset + memory_requirements.size <= IMAGE_CHUNK_SIZE ) {
+		if ( offset + memory_requirements.size <= vk.image_chunk_size ) {
 			chunk = &vk_world.image_chunks[i];
 			chunk->used = offset + memory_requirements.size;
 			break;
@@ -592,7 +593,7 @@ static void allocate_and_bind_image_memory(VkImage image) {
 
 		alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 		alloc_info.pNext = NULL;
-		alloc_info.allocationSize = IMAGE_CHUNK_SIZE;
+		alloc_info.allocationSize = vk.image_chunk_size;
 		alloc_info.memoryTypeIndex = find_memory_type(vk.physical_device, memory_requirements.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
 		VK_CHECK(qvkAllocateMemory(vk.device, &alloc_info, NULL, &memory));
@@ -1920,6 +1921,7 @@ static void vk_create_persistent_pipelines( void )
 				def.clipping_plane = qfalse;
 				def.mirror = qfalse;
 				def.shadow_phase = SHADOW_FS_QUAD;
+				def.primitives = TRIANGLE_STRIP;
 
 				vk.shadow_finish_pipeline = vk_find_pipeline_ext( 0, &def, r_shadows->integer ? qtrue: qfalse );
 			}
@@ -1938,7 +1940,7 @@ static void vk_create_persistent_pipelines( void )
 			};
 			qboolean polygon_offset[2] = { qfalse, qtrue };
 			qboolean clipping_plane[2] = { qfalse, qtrue };
-			int i, j, k, l;
+			int i, j, k, l, m;
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.shader_type = TYPE_SIGNLE_TEXTURE;
@@ -1984,10 +1986,13 @@ static void vk_create_persistent_pipelines( void )
 						def.polygon_offset = polygon_offset[k];
 						for ( l = 0; l < 2; l++ ) {
 							def.fog_stage = l; // fogStage
-							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
-							vk.dlight_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
-							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING1;
-							vk.dlight1_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
+							for ( m = 0; m < 2; m++ ) {
+								def.abs_light = m;
+								def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
+								vk.dlight_pipelines_x[i][j][k][l][m] = vk_find_pipeline_ext( 0, &def, qfalse );
+								def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING1;
+								vk.dlight1_pipelines_x[i][j][k][l][m] = vk_find_pipeline_ext( 0, &def, qfalse );
+							}
 						}
 					}
 				}
@@ -2000,7 +2005,8 @@ static void vk_create_persistent_pipelines( void )
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.state_bits = GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
-			def.face_culling = CT_TWO_SIDED;
+			def.face_culling = CT_FRONT_SIDED;
+			def.primitives = TRIANGLE_STRIP;
 
 			vk.surface_beam_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
@@ -2011,7 +2017,7 @@ static void vk_create_persistent_pipelines( void )
 			Com_Memset( &def, 0, sizeof( def ) );
 			def.state_bits = GLS_DEFAULT;
 			def.face_culling = CT_TWO_SIDED;
-			def.line_primitives = qtrue;
+			def.primitives = LINE_LIST;
 			if ( vk.wideLines )
 				def.line_width = 3;
 
@@ -2025,6 +2031,7 @@ static void vk_create_persistent_pipelines( void )
 			//def.state_bits = GLS_DEFAULT;
 			def.face_culling = CT_TWO_SIDED;
 			def.shader_type = TYPE_DOT;
+			def.primitives = POINT_LIST;
 			vk.dot_pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		}
 
@@ -2090,7 +2097,7 @@ static void vk_create_persistent_pipelines( void )
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.state_bits = GLS_DEPTHMASK_TRUE;
-			def.line_primitives = qtrue;
+			def.primitives = LINE_LIST;
 
 			vk.normals_debug_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
@@ -2107,7 +2114,7 @@ static void vk_create_persistent_pipelines( void )
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.state_bits = GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE;
-			def.line_primitives = qtrue;
+			def.primitives = LINE_LIST;
 			vk.surface_debug_pipeline_outline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
 		{
@@ -2115,6 +2122,7 @@ static void vk_create_persistent_pipelines( void )
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.state_bits = GLS_DEPTHTEST_DISABLE | GLS_SRCBLEND_SRC_ALPHA | GLS_DSTBLEND_ONE_MINUS_SRC_ALPHA;
+			def.primitives = TRIANGLE_STRIP;
 
 			vk.images_debug_pipeline = vk_find_pipeline_ext( 0, &def, qfalse );
 		}
@@ -2741,6 +2749,9 @@ void vk_initialize( void )
 	// round down to next power of 2
 	glConfig.maxTextureSize = MIN( props.limits.maxImageDimension2D, log2pad( maxSize, 0 ) );
 
+	// default chunk size, may be doubled on demand
+	vk.image_chunk_size = IMAGE_CHUNK_SIZE;
+
 	if ( props.limits.maxPerStageDescriptorSamplers != 0xFFFFFFFF )
 		glConfig.numTextureUnits = props.limits.maxPerStageDescriptorSamplers;
 	else
@@ -3134,6 +3145,8 @@ void vk_initialize( void )
 		VK_CHECK( qvkCreatePipelineCache( vk.device, &ci, NULL, &vk.pipelineCache ) );
 	}
 
+	vk.renderPassIndex = RENDER_PASS_MAIN; // default render pass
+
 	vk_create_persistent_pipelines();
 
 	vk.pipelines_world_base = vk.pipelines_count;
@@ -3408,6 +3421,16 @@ void vk_release_resources( void ) {
 	vk.pipelines_count = vk.pipelines_world_base;
 
 	VK_CHECK( qvkResetDescriptorPool( vk.device, vk.descriptor_pool, 0 ) );
+
+	if ( vk_world.num_image_chunks > 1 ) {
+		// if we allocated more than 2 image chunks - use doubled default size
+		vk.image_chunk_size = (IMAGE_CHUNK_SIZE * 2);
+	} else if ( vk_world.num_image_chunks == 1 ) {
+		// otherwise set to default if used less than a half
+		if ( vk_world.image_chunks[0].used < ( IMAGE_CHUNK_SIZE - (IMAGE_CHUNK_SIZE / 10) ) ) {
+			vk.image_chunk_size = IMAGE_CHUNK_SIZE;
+		}
+	}
 
 	Com_Memset( &vk_world, 0, sizeof( vk_world ) );
 
@@ -3801,8 +3824,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	VkShaderModule *vs_module = NULL;
 	VkShaderModule *fs_module = NULL;
 	int32_t vert_spec_data[1]; // clippping
-	floatint_t frag_spec_data[5]; // alpha-test-func, alpha-test-value, depth-fragment, alpha-to-coverage, color_mode
-	VkSpecializationMapEntry spec_entries[6];
+	floatint_t frag_spec_data[6]; // alpha-test-func, alpha-test-value, depth-fragment, alpha-to-coverage, color_mode, abs_light
+	VkSpecializationMapEntry spec_entries[7];
 	VkSpecializationInfo vert_spec_info;
 	VkSpecializationInfo frag_spec_info;
 	VkPipelineVertexInputStateCreateInfo vertex_input_state;
@@ -3927,7 +3950,18 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 		case TYPE_COLOR_RED:   frag_spec_data[4].i = 2; break;
 	}
 
+	switch ( def->shader_type ) {
+		case TYPE_SIGNLE_TEXTURE_LIGHTING:
+		case TYPE_SIGNLE_TEXTURE_LIGHTING1:
+			frag_spec_data[5].i = def->abs_light ? 1 : 0;
+		default:
+			break;
+	}
+
+	//
 	// vertex module specialization data
+	//
+
 	spec_entries[0].constantID = 0; // clip_plane
 	spec_entries[0].offset = 0 * sizeof( int32_t );
 	spec_entries[0].size = sizeof( int32_t );
@@ -3938,7 +3972,10 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	vert_spec_info.pData = &vert_spec_data[0];
 	shader_stages[0].pSpecializationInfo = &vert_spec_info;
 
+	//
 	// fragment module specialization data
+	//
+
 	spec_entries[1].constantID = 0;  // alpha-test-function
 	spec_entries[1].offset = 0 * sizeof( int32_t );
 	spec_entries[1].size = sizeof( int32_t );
@@ -3959,9 +3996,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	spec_entries[5].offset = 4 * sizeof( int32_t );
 	spec_entries[5].size = sizeof( int32_t );
 
-	frag_spec_info.mapEntryCount = 5;
+	spec_entries[6].constantID = 5; // abs_light
+	spec_entries[6].offset = 5 * sizeof( int32_t );
+	spec_entries[6].size = sizeof( int32_t );
+
+	frag_spec_info.mapEntryCount = 6;
 	frag_spec_info.pMapEntries = spec_entries + 1;
-	frag_spec_info.dataSize = sizeof( int32_t ) + sizeof( float ) + sizeof( float ) + sizeof( int32_t ) + sizeof( int32_t );
+	frag_spec_info.dataSize = sizeof( int32_t ) * 6;
 	frag_spec_info.pData = &frag_spec_data[0];
 	shader_stages[1].pSpecializationInfo = &frag_spec_info;
 
@@ -4032,11 +4073,14 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	input_assembly_state.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
 	input_assembly_state.pNext = NULL;
 	input_assembly_state.flags = 0;
-	if ( def->shader_type == TYPE_DOT )
-		input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
-	else
-		input_assembly_state.topology = def->line_primitives ? VK_PRIMITIVE_TOPOLOGY_LINE_LIST : VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 	input_assembly_state.primitiveRestartEnable = VK_FALSE;
+
+	switch ( def->primitives ) {
+		case LINE_LIST: input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST; break;
+		case POINT_LIST: input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_POINT_LIST; break;
+		case TRIANGLE_STRIP: input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP; break;
+		default: input_assembly_state.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST; break;
+	}
 
 	//
 	// Viewport.
@@ -4103,7 +4147,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	multisample_state.pNext = NULL;
 	multisample_state.flags = 0;
 
-	multisample_state.rasterizationSamples = vk.renderPassIndex == RENDER_PASS_SCREENMAP ? vk.screenMapSamples : vkSamples;
+	multisample_state.rasterizationSamples = (vk.renderPassIndex == RENDER_PASS_SCREENMAP) ? vk.screenMapSamples : vkSamples;
 
 	multisample_state.sampleShadingEnable = VK_FALSE;
 	multisample_state.minSampleShading = 1.0f;
@@ -4869,7 +4913,10 @@ void vk_draw_geometry( uint32_t pipeline, Vk_Depth_Range depth_range, qboolean i
 
 	// bind pipeline
 	vkpipe = vk_gen_pipeline( pipeline );
-	qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
+	if ( vkpipe != vk.cmd->last_pipeline ) {
+		qvkCmdBindPipeline( vk.cmd->command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, vkpipe );
+		vk.cmd->last_pipeline = vkpipe;
+	}
 
 	// configure pipeline's dynamic state
 	if ( vk.cmd->depth_range != depth_range ) {
@@ -4911,13 +4958,15 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 	render_pass_begin_info.framebuffer = frameBuffer;
 	render_pass_begin_info.renderArea.offset.x = 0;
 	render_pass_begin_info.renderArea.offset.y = 0;
-	render_pass_begin_info.renderArea.extent.width = width; // TODO: renderWidth?
-	render_pass_begin_info.renderArea.extent.height = height; // TODO: renderHeight?
+	render_pass_begin_info.renderArea.extent.width = width;
+	render_pass_begin_info.renderArea.extent.height = height;
 
 	if ( clearValues ) {
-		/// ignore clear_values[0] which corresponds to color attachment
+		/// attachments layout:
+		// [0] - resolve/color/presentation
+		// [1] - depth/stencil
+		// [2] - multisampled color, optional
 		Com_Memset( clear_values, 0, sizeof( clear_values ) );
-		clear_values[0].depthStencil.depth = 1.0;
 		clear_values[1].depthStencil.depth = 1.0;
 		render_pass_begin_info.clearValueCount = ARRAY_LEN( clear_values );
 		render_pass_begin_info.pClearValues = clear_values;
@@ -4981,6 +5030,26 @@ void vk_end_render_pass( void )
 	qvkCmdEndRenderPass( vk.cmd->command_buffer );
 
 //	vk.renderPassIndex = RENDER_PASS_MAIN;
+}
+
+static qboolean vk_find_drawsurfs( void )
+{
+	const void *curCmd = &backEndData->commands.cmds;
+	const drawBufferCommand_t *db_cmd;
+
+	for ( ;; ) {
+		curCmd = PADP( curCmd, sizeof(void *) );
+		switch ( *(const int *)curCmd ) {
+			case RC_DRAW_BUFFER:
+				db_cmd = (const drawBufferCommand_t *)curCmd;
+				curCmd = (const void *)(db_cmd + 1);
+				break;
+			case RC_DRAW_SURFS:
+				return qtrue;
+			default:
+				return qfalse;
+		}
+	}
 }
 
 
@@ -5052,12 +5121,6 @@ void vk_begin_frame( void )
 	}
 #endif
 
-	if ( tr.needScreenMap ) {
-		vk_begin_screenmap_render_pass();
-	} else {
-		vk_begin_main_render_pass();
-	}
-
 	if ( vk.cmd->vertex_buffer_offset > vk.stats.vertex_buffer_max ) {
 		vk.stats.vertex_buffer_max = vk.cmd->vertex_buffer_offset;
 	}
@@ -5067,6 +5130,16 @@ void vk_begin_frame( void )
 	}
 
 	vk_world.dirty_depth_attachment = qfalse;
+
+	vk.cmd->last_pipeline = VK_NULL_HANDLE;
+
+	backEnd.screenMapDone = qfalse;
+
+	if ( tr.needScreenMap && vk_find_drawsurfs() ) {
+		vk_begin_screenmap_render_pass();
+	} else {
+		vk_begin_main_render_pass();
+	}
 
 	// dynamic vertex buffer layout
 	vk.cmd->uniform_read_offset = 0;
@@ -5133,7 +5206,7 @@ void vk_end_frame( void )
 	{
 		if ( !ri.CL_IsMinimized() )
 		{
-			if ( vk.renderPassIndex )
+			if ( vk.renderPassIndex == RENDER_PASS_SCREENMAP )
 			{
 				// just to make proper layout transition
 				vk_end_render_pass();

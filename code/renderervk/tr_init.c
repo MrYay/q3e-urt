@@ -23,7 +23,7 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 #include "tr_local.h"
 
-glconfig_t	glConfig = { 0 };
+glconfig_t	glConfig;
 qboolean	textureFilterAnisotropic;
 int			maxAnisotropy;
 int			gl_version;
@@ -485,6 +485,11 @@ static void InitOpenGL( void )
 	if ( glConfig.vidWidth == 0 )
 	{
 #ifdef USE_VULKAN
+		if ( !ri.VKimp_Init )
+		{
+			ri.Error( ERR_FATAL, "Vulkan interface is not initialized" );
+		}
+
 		// This function is responsible for initializing a valid Vulkan subsystem.
 		ri.VKimp_Init( &glConfig );
 
@@ -1399,6 +1404,7 @@ static void VkInfo_f( void )
 
 	ri.Printf(PRINT_ALL, "created pipelines: %i\n", vk.pipeline_create_count );
 	ri.Printf(PRINT_ALL, "allocated pipelines: %i\n", vk.pipelines_count );
+	ri.Printf(PRINT_ALL, "image chunks: %i\n", vk_world.num_image_chunks );
 }
 #endif
 

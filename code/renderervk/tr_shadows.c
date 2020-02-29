@@ -158,6 +158,12 @@ void RB_ShadowTessEnd( void ) {
 #endif
 		VectorCopy( backEnd.currentEntity->lightDir, lightDir );
 
+	// clamp projection by height
+	if ( lightDir[2] > 0.1 ) {
+		float s = 0.1 / lightDir[2];
+		VectorScale( lightDir, s, lightDir );
+	}
+
 	// project vertexes away from light direction
 	for ( i = 0; i < tess.numVertexes; i++ ) {
 		VectorMA( tess.xyz[i], -512, lightDir, tess.xyz[i+tess.numVertexes] );
@@ -230,7 +236,7 @@ void RB_ShadowTessEnd( void ) {
 	qglDisable( GL_TEXTURE_2D );
 	//GL_Bind( tr.whiteImage );
 	GL_State( GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
-	qglColor3f( 0.2f, 0.2f, 0.2f );
+	qglColor4f( 0.2f, 0.2f, 0.2f, 1.0f );
 
 	// don't write to the color buffer
 	qglGetBooleanv( GL_COLOR_WRITEMASK, rgba );
@@ -258,6 +264,8 @@ void RB_ShadowTessEnd( void ) {
 	qglEnable( GL_TEXTURE_2D );
 #endif
 
+	backEnd.doneShadows = qtrue;
+
 	tess.numIndexes = 0;
 }
 
@@ -277,6 +285,19 @@ void RB_ShadowFinish( void ) {
 	float tmp[16];
 	int i;
 #endif
+	static const vec3_t verts[4] = {
+		{ -100, 100, -10 },
+		{  100, 100, -10 },
+		{ -100,-100, -10 },
+		{  100,-100, -10 }
+	};
+
+	if ( !backEnd.doneShadows ) {
+		return;
+	}
+
+	backEnd.doneShadows = qfalse;
+
 	if ( r_shadows->integer != 2 ) {
 		return;
 	}
@@ -287,23 +308,10 @@ void RB_ShadowFinish( void ) {
 #ifdef USE_VULKAN
 	GL_Bind( tr.whiteImage );
 
-	tess.indexes[0] = 0;
-	tess.indexes[1] = 1;
-	tess.indexes[2] = 2;
-	tess.indexes[3] = 0;
-	tess.indexes[4] = 2;
-	tess.indexes[5] = 3;
-	tess.numIndexes = 6;
-
-	VectorSet(tess.xyz[0], -100,  100, -10);
-	VectorSet(tess.xyz[1],  100,  100, -10);
-	VectorSet(tess.xyz[2],  100, -100, -10);
-	VectorSet(tess.xyz[3], -100, -100, -10);
-
-	for (i = 0; i < 4; i++)
+	for ( i = 0; i < 4; i++ )
 	{
-		VectorSet(tess.svars.colors[i], 153, 153, 153);
-		tess.svars.colors[i][3] = 255;
+		VectorCopy( verts[i], tess.xyz[i] );
+		Vector4Set( tess.svars.colors[i], 153, 153, 153, 255 );
 	}
 
 	tess.numVertexes = 4;
@@ -318,8 +326,8 @@ void RB_ShadowFinish( void ) {
 
 	vk_update_mvp( NULL );
 
-	vk_bind_geometry_ext( TESS_IDX | TESS_XYZ | TESS_RGBA /*| TESS_ST0 */ );
-	vk_draw_geometry( vk.shadow_finish_pipeline, DEPTH_RANGE_NORMAL, qtrue );
+	vk_bind_geometry_ext( TESS_XYZ | TESS_RGBA /*| TESS_ST0 */ );
+	vk_draw_geometry( vk.shadow_finish_pipeline, DEPTH_RANGE_NORMAL, qfalse );
 
 	Com_Memcpy( vk_world.modelview_transform, tmp, 64 );
 
@@ -333,25 +341,24 @@ void RB_ShadowFinish( void ) {
 	qglDisable( GL_CLIP_PLANE0 );
 	GL_Cull( CT_TWO_SIDED );
 
-	GL_Bind( tr.whiteImage );
+	qglDisable( GL_TEXTURE_2D );
 
 	qglLoadIdentity();
 
-	qglColor3f( 0.6f, 0.6f, 0.6f );
+	qglColor4f( 0.6f, 0.6f, 0.6f, 1 );
 	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO );
 
-//	qglColor3f( 1, 0, 0 );
-//	GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
+	//qglColor4f( 1, 0, 0, 1 );
+	//GL_State( GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_ONE | GLS_DSTBLEND_ZERO );
 
-	qglBegin( GL_QUADS );
-	qglVertex3f( -100, 100, -10 );
-	qglVertex3f( 100, 100, -10 );
-	qglVertex3f( 100, -100, -10 );
-	qglVertex3f( -100, -100, -10 );
-	qglEnd();
+	GL_ClientState( 0, CLS_NONE );
+	qglVertexPointer( 3, GL_FLOAT, 0, verts );
+	qglDrawArrays( GL_TRIANGLE_STRIP, 0, 4 );
 
 	qglColor4f( 1, 1, 1, 1 );
 	qglDisable( GL_STENCIL_TEST );
+
+	qglEnable( GL_TEXTURE_2D );
 #endif
 }
 

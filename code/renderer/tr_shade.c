@@ -115,10 +115,10 @@ static void DrawTris( shaderCommands_t *input ) {
 
 #ifdef USE_PMLIGHT
 	if ( tess.dlightPass )
-		qglColor3f( 1.0f, 0.33f, 0.2f );
+		qglColor4f( 1.0f, 0.33f, 0.2f, 1.0f );
 	else
 #endif
-	qglColor3f( 1, 1, 1 );
+	qglColor4f( 1, 1, 1, 1 );
 
 	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
 	qglDepthRange( 0, 0 );
@@ -154,19 +154,16 @@ static void DrawNormals( const shaderCommands_t *input ) {
 	GL_ClientState( 0, CLS_NONE );
 
 	qglDisable( GL_TEXTURE_2D );
-	qglColor3f( 1, 1, 1 );
+	qglColor4f( 1, 1, 1, 1 );
 
 	qglDepthRange( 0, 0 );	// never occluded
 
-	GL_State( GLS_POLYMODE_LINE | GLS_DEPTHMASK_TRUE );
+	GL_State( GLS_DEPTHMASK_TRUE );
 
-	tess.numIndexes = 0;
-	for ( i = 0; i < tess.numVertexes; i++ ) {
-		VectorMA( tess.xyz[i], 2.0, tess.normal[i], tess.xyz[i + tess.numVertexes] );
-		tess.indexes[  tess.numIndexes + 0 ] = i;
-		tess.indexes[  tess.numIndexes + 1 ] = i + tess.numVertexes;
-		tess.numIndexes += 2;
-	}
+	for ( i = tess.numVertexes-1; i >= 0; i-- ) {
+		VectorMA( tess.xyz[i], 2.0, tess.normal[i], tess.xyz[i*2 + 1] );
+		VectorCopy( tess.xyz[i], tess.xyz[i*2] );
+	} 
 
 	qglVertexPointer( 3, GL_FLOAT, sizeof( tess.xyz[0] ), tess.xyz );
 
@@ -174,7 +171,7 @@ static void DrawNormals( const shaderCommands_t *input ) {
 		qglLockArraysEXT( 0, tess.numVertexes * 2 );
 	}
 
-	qglDrawElements( GL_LINES, tess.numIndexes, GL_INDEX_TYPE, tess.indexes );
+	qglDrawArrays( GL_LINES, 0, tess.numVertexes * 2 );
 
 	if ( qglUnlockArraysEXT ) {
 		qglUnlockArraysEXT();
@@ -215,7 +212,7 @@ void RB_BeginSurface( shader_t *shader, int fogNum ) {
 	}
 
 #ifdef USE_PMLIGHT
-	if ( tess.fogNum != fogNum ) {
+	if ( tess.fogNum != fogNum || tess.cullType != state->cullType ) {
 		tess.dlightUpdateParams = qtrue;
 	}
 #endif

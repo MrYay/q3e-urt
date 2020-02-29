@@ -49,31 +49,7 @@ typedef enum {
 	CT_TWO_SIDED
 } cullType_t;
 
-typedef struct image_s {
-	char		*imgName;			// image path, including extension
-	struct image_s *next;			// for hash search
-	int			width, height;		// source image
-	int			uploadWidth;		// after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
-	int			uploadHeight;
-	imgFlags_t	flags;
-	int			frameUsed;			// for texture usage in frame statistics
-
-#ifdef USE_VULKAN
-	int			internalFormat;
-
-	VkSamplerAddressMode wrapClampMode;
-	VkImage		handle;
-	VkImageView	view;
-	// Descriptor set that contains single descriptor used to access the given image.
-	// It is updated only once during image initialization.
-	VkDescriptorSet descriptor;
-#else
-	GLuint		texnum;				// gl texture binding
-	GLint		internalFormat;
-	int			TMU;				// only needed for voodoo2
-#endif
-
-} image_t;
+typedef struct image_s image_t;
 
 // any change in the LIGHTMAP_* defines here MUST be reflected in
 // R_FindShader() in tr_bsp.c
@@ -119,7 +95,7 @@ float R_NoiseGet4f( float x, float y, float z, double t );
 void  R_NoiseInit( void );
 
 image_t *R_FindImageFile( const char *name, imgFlags_t flags );
-image_t *R_CreateImage( const char *name, byte *pic, int width, int height, imgFlags_t flags );
+image_t *R_CreateImage( const char *name, const char *name2, byte *pic, int width, int height, imgFlags_t flags );
 void R_UploadSubImage( byte *data, int x, int y, int width, int height, image_t *image );
 
 void R_IssuePendingRenderCommands( void );

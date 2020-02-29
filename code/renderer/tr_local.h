@@ -82,7 +82,7 @@ typedef struct {
 
 	float		axisLength;		// compensate for non-normalized axis
 #ifdef USE_LEGACY_DLIGHTS
-	qboolean	needDlights;	// true for bmodels that touch a dlight
+	int			needDlights;	// 1 for bmodels that touch a dlight
 #endif
 	qboolean	lightingCalculated;
 	vec3_t		lightDir;		// normalized direction towards light
@@ -464,6 +464,24 @@ typedef struct {
 	struct litSurf_s	*litSurfs;
 #endif
 } trRefdef_t;
+
+
+typedef struct image_s {
+	char		*imgName;			// image path, including extension
+	char		*imgName2;			// image path with real file extension
+	struct image_s *next;			// for hash search
+	int			width, height;		// source image
+	int			uploadWidth;		// after power of two and picmip but not including clamp to MAX_TEXTURE_SIZE
+	int			uploadHeight;
+	imgFlags_t	flags;
+	GLuint		texnum;				// gl texture binding
+
+	int			frameUsed;			// for texture usage in frame statistics
+
+	GLint		internalFormat;
+	int			TMU;				// only needed for voodoo2
+
+} image_t;
 
 
 //=================================================================================
@@ -1016,6 +1034,7 @@ typedef struct {
 	
 	qboolean throttle;
 	qboolean drawConsole;
+	qboolean doneShadows;
 
 } backEndState_t;
 
@@ -1297,6 +1316,7 @@ void R_RotateForEntity( const trRefEntity_t *ent, const viewParms_t *viewParms, 
 /*
 ** GL wrapper/helper functions
 */
+const float *GL_Ortho( const float left, const float right, const float bottom, const float top, const float znear, const float zfar );
 void	GL_Bind( image_t *image );
 void	GL_BindTexNum( GLuint texnum );
 void	GL_SelectTexture( int unit );
@@ -1453,6 +1473,7 @@ typedef struct shaderCommands_s
 	const dlight_t* light;
 	qboolean	dlightPass;
 	qboolean	dlightUpdateParams;
+	cullType_t	cullType;
 #endif
 
 	// info extracted from current shader
@@ -1907,8 +1928,14 @@ typedef enum {
 	DLIGHT_FRAGMENT,
 	DLIGHT_FRAGMENT_FOG,
 
+	DLIGHT_ABS_FRAGMENT,
+	DLIGHT_ABS_FRAGMENT_FOG,
+
 	DLIGHT_LINEAR_FRAGMENT,
 	DLIGHT_LINEAR_FRAGMENT_FOG,
+
+	DLIGHT_LINEAR_ABS_FRAGMENT,
+	DLIGHT_LINEAR_ABS_FRAGMENT_FOG,
 #endif
 	SPRITE_FRAGMENT,
 	GAMMA_FRAGMENT,

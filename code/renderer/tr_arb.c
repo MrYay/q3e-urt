@@ -248,6 +248,7 @@ void ARB_SetupLightParams( void )
 	float radius;
 
 	tess.dlightUpdateParams = qfalse;
+	tess.cullType = tess.shader->cullType;
 
 	if ( !programCompiled )
 		return;
@@ -255,7 +256,7 @@ void ARB_SetupLightParams( void )
 	dl = tess.light;
 
 	if ( !glConfig.deviceSupportsGamma )
-		VectorScale( dl->color, 2 * pow( r_intensity->value, r_gamma->value ), lightRGB );
+		VectorScale( dl->color, 2 * powf( r_intensity->value, r_gamma->value ), lightRGB );
 	else
 		VectorCopy( dl->color, lightRGB );
 
@@ -267,9 +268,9 @@ void ARB_SetupLightParams( void )
 	vertexProgram = DLIGHT_VERTEX;
 
 	if ( dl->linear ) {
-		fragmentProgram = DLIGHT_LINEAR_FRAGMENT;
+		fragmentProgram = (tess.shader->cullType == CT_TWO_SIDED) ? DLIGHT_LINEAR_ABS_FRAGMENT : DLIGHT_LINEAR_FRAGMENT;
 	} else {
-		fragmentProgram = DLIGHT_FRAGMENT;
+		fragmentProgram = (tess.shader->cullType == CT_TWO_SIDED) ? DLIGHT_ABS_FRAGMENT : DLIGHT_FRAGMENT;
 	}
 
 	if ( fogPass ) {
@@ -444,9 +445,41 @@ static const char *dlightVP = {
 };
 
 
-static const char *ARB_BuildDlightFP( char *program, qboolean fog, qboolean linear )
+static const char *ARB_BuildDlightFP( char *program, int programIndex )
 {
+	qboolean fog = qfalse;
+	qboolean linear = qfalse;
+	qboolean abslight = qfalse;
+
 	program[0] = '\0';
+
+	switch ( programIndex ) {
+		case DLIGHT_FRAGMENT_FOG:
+		case DLIGHT_ABS_FRAGMENT_FOG:
+		case DLIGHT_LINEAR_FRAGMENT_FOG:
+		case DLIGHT_LINEAR_ABS_FRAGMENT_FOG:
+			fog = qtrue;
+			break;
+	}
+
+	switch ( programIndex ) {
+		case DLIGHT_LINEAR_FRAGMENT:
+		case DLIGHT_LINEAR_FRAGMENT_FOG:
+		case DLIGHT_LINEAR_ABS_FRAGMENT:
+		case DLIGHT_LINEAR_ABS_FRAGMENT_FOG:
+			linear = qtrue;
+			break;
+	}
+
+	switch ( programIndex ) {
+		case DLIGHT_ABS_FRAGMENT:
+		case DLIGHT_ABS_FRAGMENT_FOG:
+		case DLIGHT_LINEAR_ABS_FRAGMENT:
+		case DLIGHT_LINEAR_ABS_FRAGMENT_FOG:
+			abslight = qtrue;
+			break;
+	}
+
 	strcat( program,
 	"!!ARBfp1.0 \n"
 	"OPTION ARB_precision_hint_fastest; \n"
@@ -488,8 +521,7 @@ static const char *ARB_BuildDlightFP( char *program, qboolean fog, qboolean line
 	// discard blank fragments
 	"KIL tmp.x; \n"
 
-	"MUL light, lightRGB, tmp.x; \n" // light.rgb
-	);
+	"MUL light, lightRGB, tmp.x; \n" ); // light.rgb
 
 	if ( r_dlightSpecColor->value > 0 )
 		strcat( program, va( "PARAM specRGB = %1.2f; \n", r_dlightSpecColor->value ) );
@@ -507,12 +539,22 @@ static const char *ARB_BuildDlightFP( char *program, qboolean fog, qboolean line
 	"ADD tmp, lv, ev; \n"
 	"DP3 tmp.w, tmp, tmp; \n"
 	"RSQ tmp.w, tmp.w; \n"
-	"MUL tmp.xyz, tmp, tmp.w; \n"
+	"MUL tmp.xyz, tmp, tmp.w; \n" );
 
 	// modulate specular strength
-	"DP3_SAT tmp.w, n, tmp; \n"
+	if ( abslight ) {
+		strcat( program,
+		"DP3 tmp.w, n, tmp; \n"
+		"ABS tmp.w, tmp.w; \n" );
+	} else {
+		strcat( program,
+		"DP3_SAT tmp.w, n, tmp; \n" );
+	}
+
+	strcat( program,
 	"POW tmp.w, tmp.w, specEXP.w; \n"
 	"TEMP spec; \n" );
+
 	if ( r_dlightSpecColor->value > 0 ) {
 		// by constant
 		strcat( program, "MUL spec, specRGB, tmp.w; \n" );
@@ -522,31 +564,23 @@ static const char *ARB_BuildDlightFP( char *program, qboolean fog, qboolean line
 		strcat( program, "MUL spec, base, tmp.w; \n" );
 	}
 
-	strcat( program,
-	// bump color
-	"TEMP bump; \n"
-	"DP3_SAT bump.w, n, lv; \n"
+	// diffuse
+	if ( abslight ) {
+		strcat( program,
+		"TEMP bump; \n"
+		"DP3 bump.w, n, lv; \n"
+		// make sure that light and eye vectors are on the same plane side
+		"DP3 tmp.w, n, ev; \n"
+		"MUL tmp.w, tmp.w, bump.w; \n"
+		"KIL tmp.w; \n"
+		"ABS bump.w, bump.w; \n" );
+	} else {
+		strcat( program,
+		"TEMP bump; \n"
+		"DP3_SAT bump.w, n, lv; \n" );
+	}
 
-#if 0
-	// add some light leaks from line plane
-	"SUB tmp, fragmentPos, lightOrigin; \n"
-	"DP3 tmp.w, tmp, tmp;\n"
-	"RSQ tmp.w, tmp.w; \n"
-	"MUL tmp.xyz, tmp, tmp.w; \n"
-	"DP3_SAT tmp.w, n, tmp; \n"
-	//"MUL tmp.w, tmp, 0.5; \n"
-	"MAX bump.w, bump.w, tmp.w; \n"
-
-	"SUB tmp, fragmentPos, lightOrigin2; \n"
-	"DP3 tmp.w, tmp, tmp;\n"
-	"RSQ tmp.w, tmp.w; \n"
-	"MUL tmp.xyz, tmp, tmp.w; \n"
-	"DP3_SAT tmp.w, n, tmp; \n"
-	//"MUL tmp.w, tmp, 0.5; \n"
-	"MAX bump.w, bump.w, tmp.w; \n"
-#endif
-
-	"MAD base, base, bump.w, spec; \n" );
+	strcat( program, "MAD base, base, bump.w, spec; \n" );
 
 	if ( fog ) {
 		strcat( program,
@@ -806,16 +840,20 @@ static const char *blend2gammaFP = {
 
 static void RenderQuad( int w, int h )
 {
-	qglBegin( GL_QUADS );
-		qglTexCoord2f( 0.0f, 0.0f );
-		qglVertex2f( 0.0f, h );
-		qglTexCoord2f( 0.0f, 1.0f );
-		qglVertex2f( 0.0f, 0.0f );
-		qglTexCoord2f( 1.0f, 1.0f );
-		qglVertex2f( w, 0.0f );
-		qglTexCoord2f( 1.0f, 0.0f );
-		qglVertex2f( w, h );
-	qglEnd();
+	static const vec2_t t[4] = { {0.0, 1.0}, {1.0, 1.0}, {0.0, 0.0}, {1.0, 0.0} };
+	static vec3_t v[4] = { 0 };
+	
+	v[1][0] = w;
+	v[2][1] = h;
+	v[3][0] = w;
+	v[3][1] = h;
+
+	GL_ClientState( 0, CLS_TEXCOORD_ARRAY );
+
+	qglVertexPointer( 3, GL_FLOAT, 0, v );
+	qglTexCoordPointer( 2, GL_FLOAT, 0, t );
+
+	qglDrawArrays( GL_TRIANGLE_STRIP, 0, 4 );
 }
 
 
@@ -958,6 +996,7 @@ qboolean ARB_UpdatePrograms( void )
 {
 #ifdef USE_PMLIGHT
 	const char *program;
+	int i;
 #endif
 	char buf[4096];
 
@@ -980,19 +1019,12 @@ qboolean ARB_UpdatePrograms( void )
 	if ( !ARB_CompileProgram( Vertex, va( dlightVP, fogOutVPCode ), programs[ DLIGHT_VERTEX_FOG_OUT ] ) )
 		return qfalse;
 
-	program = ARB_BuildDlightFP( buf, qfalse, qfalse );
-	if ( !ARB_CompileProgram( Fragment, program, programs[ DLIGHT_FRAGMENT ] ) )
-		return qfalse;
-	program = ARB_BuildDlightFP( buf, qtrue, qfalse );
-	if ( !ARB_CompileProgram( Fragment, program, programs[ DLIGHT_FRAGMENT_FOG ] ) )
-		return qfalse;
-
-	program = ARB_BuildDlightFP( buf, qfalse, qtrue );
-	if ( !ARB_CompileProgram( Fragment, program, programs[ DLIGHT_LINEAR_FRAGMENT ] ) )
-		return qfalse;
-	program = ARB_BuildDlightFP( buf, qtrue, qtrue );
-	if ( !ARB_CompileProgram( Fragment, program, programs[ DLIGHT_LINEAR_FRAGMENT_FOG ] ) )
-		return qfalse;
+	for ( i = DLIGHT_FRAGMENT; i <= DLIGHT_LINEAR_ABS_FRAGMENT_FOG; i++ ) {
+		program = ARB_BuildDlightFP( buf, i );
+		if ( !ARB_CompileProgram( Fragment, program, programs[ i ] ) ) {
+			return qfalse;
+		}
+	}
 #endif // USE_PMLIGHT
 
 	if ( !ARB_CompileProgram( Vertex, dummyVP, programs[ DUMMY_VERTEX ] ) )
@@ -1642,8 +1674,7 @@ void FBO_CopyScreen( void )
 	//if ( !backEnd.projection2D )
 	{
 		qglMatrixMode( GL_PROJECTION );
-		qglLoadIdentity();
-		qglOrtho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 );
+		qglLoadMatrixf( GL_Ortho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 ) );
 		qglMatrixMode( GL_MODELVIEW );
 		qglLoadIdentity();
 		GL_Cull( CT_TWO_SIDED );
@@ -1665,24 +1696,38 @@ void FBO_CopyScreen( void )
 }
 
 
-static void R_Bloom_Quad_Lens( float offset )
+static void R_Setup_Quad_Lens( float offset, vec4_t color, vec3_t *verts, vec2_t *coords, vec4_t *colors )
 {
-	const int width = glConfig.vidWidth;
-	const int height = glConfig.vidHeight;
+	static const vec2_t t[6] = { {1.0, 0.0}, {0.0, 0.0}, {0.0, 1.0}, {0.0, 1.0}, {1.0, 1.0}, {1.0, 0.0} };
 
-	qglBegin( GL_QUADS );
-	qglTexCoord2f( 0.0f, 1.0f );
-	qglVertex2f( width + offset, height + offset );
+	const float width = (float)glConfig.vidWidth;
+	const float height = (float)glConfig.vidHeight;
+	int i;
+	
+	for ( i = 0; i < 6; i++ ) {
+		coords[i][0] = t[i][0];
+		coords[i][1] = t[i][1];
+		Vector4Copy( color, colors[i] );
+		verts[i][2] = 0.0;
+	}
 
-	qglTexCoord2f( 0.0f, 0.0f );
-	qglVertex2f( width + offset, -offset );
+	verts[0][0] = -offset;
+	verts[0][1] = -offset;
 
-	qglTexCoord2f( 1.0f, 0.0f );
-	qglVertex2f( -offset, -offset );
+	verts[1][0] = width + offset;
+	verts[1][1] = -offset;
 
-	qglTexCoord2f( 1.0f, 1.0f );
-	qglVertex2f( -offset, height + offset );
-	qglEnd();
+	verts[2][0] = width + offset;
+	verts[2][1] = height + offset;
+
+	verts[3][0] = width + offset;
+	verts[3][1] = height + offset;
+
+	verts[4][0] = -offset;
+	verts[4][1] = height + offset;
+
+	verts[5][0] = -offset;
+	verts[5][1] = -offset;
 }
 
 
@@ -1708,12 +1753,25 @@ static void R_Bloom_LensEffect( float alpha )
 		{ 0.78f, 0.21f, 0.59f },
 	};
 	int i;
-	
+
+	vec3_t verts[ ARRAY_LEN(lc) * 6 ];
+	vec2_t coords[ ARRAY_LEN(lc) * 6 ];
+	vec4_t colors[ ARRAY_LEN(lc) * 6 ];
+	vec4_t color;
+
 	alpha /= (float)ARRAY_LEN( lc );
 	for ( i = 0; i < ARRAY_LEN( lc ); i++ ) {
-		qglColor4f( lc[i][0], lc[i][1], lc[i][2], alpha );
-		R_Bloom_Quad_Lens( (i+1)*144 );
+		VectorCopy( lc[i], color ); color[3] = alpha;
+		R_Setup_Quad_Lens( (i+1)*144, color, &verts[i*6], &coords[i*6], &colors[i*6] );
 	}
+
+	GL_ClientState( 0, CLS_TEXCOORD_ARRAY | CLS_COLOR_ARRAY );
+
+	qglVertexPointer( 3, GL_FLOAT, 0, verts );
+	qglTexCoordPointer( 2, GL_FLOAT, 0, coords );
+	qglColorPointer( 4, GL_FLOAT, 0, colors );
+
+	qglDrawArrays( GL_TRIANGLES, 0, ARRAY_LEN( verts ) );
 }
 
 
@@ -1917,8 +1975,7 @@ void FBO_PostProcess( void )
 		qglViewport( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 		qglScissor( 0, 0, glConfig.vidWidth, glConfig.vidHeight );
 		qglMatrixMode( GL_PROJECTION );
-		qglLoadIdentity();
-		qglOrtho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 );
+		qglLoadMatrixf( GL_Ortho( 0, glConfig.vidWidth, glConfig.vidHeight, 0, 0, 1 ) );
 		qglMatrixMode( GL_MODELVIEW );
 		qglLoadIdentity();
 		backEnd.projection2D = qtrue;
