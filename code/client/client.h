@@ -214,6 +214,7 @@ typedef struct {
 	char		downloadURL[MAX_OSPATH];
 	CURL		*downloadCURL;
 	CURLM		*downloadCURLM;
+	char		mapname[MAX_CVAR_VALUE_STRING];
 #endif /* USE_CURL */
 
 	// demo information
