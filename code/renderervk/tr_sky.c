@@ -473,7 +473,7 @@ static void DrawSkySide( image_t *image, const int mins[2], const int maxs[2], i
 
 		tess.svars.texcoordPtr[0] = tess.texCoords[0];
 
-		vk_bind_geometry_ext( tess_flags );	
+		vk_bind_geometry_ext( tess_flags );
 		vk_draw_geometry( vk.skybox_pipeline, r_showsky->integer ? DEPTH_RANGE_ZERO : DEPTH_RANGE_ONE, qtrue );
 
 		tess.numVertexes = 0;
@@ -895,7 +895,6 @@ void RB_StageIteratorSky( void ) {
 	// draw the outer skybox
 	if ( tess.shader->sky.outerbox[0] && tess.shader->sky.outerbox[0] != tr.defaultImage ) {
 #ifdef USE_VULKAN
-		// vk_update_mvp( NULL );
 		DrawSkyBox( tess.shader );
 #else
 		GL_ClientState( 1, CLS_NONE );

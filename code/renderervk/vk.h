@@ -4,11 +4,20 @@
 #include "tr_common.h"
 
 #define MAX_SWAPCHAIN_IMAGES 4
+#define MIN_SWAPCHAIN_IMAGES_IMM 3
+#define MIN_SWAPCHAIN_IMAGES_FIFO 3
+#define MIN_SWAPCHAIN_IMAGES_MAILBOX 3
+
 #define MAX_VK_SAMPLERS 32
 #define MAX_VK_PIPELINES (1024 + 128)
 
+#define VERTEX_BUFFER_SIZE (4 * 1024 * 1024)
 #define IMAGE_CHUNK_SIZE (32 * 1024 * 1024)
 #define MAX_IMAGE_CHUNKS 48
+
+#define NUM_COMMAND_BUFFERS 2	// number of command buffers / render semaphores / framebuffer sets
+#define USE_SINGLE_FBO		// use single framebuffer set for all command buffers
+//#define USE_DEDICATED_ALLOCATION
 
 #define USE_IMAGE_POOL
 #define USE_IMAGE_LAYOUT_1
@@ -28,6 +37,7 @@ typedef enum {
 	TYPE_SIGNLE_TEXTURE_LIGHTING1,
 	TYPE_MULTI_TEXTURE_MUL,
 	TYPE_MULTI_TEXTURE_ADD,
+	TYPE_MULTI_TEXTURE_ADD2,
 	TYPE_COLOR_WHITE,
 	TYPE_COLOR_GREEN,
 	TYPE_COLOR_RED,
@@ -105,15 +115,6 @@ typedef struct vkUniform_s {
 	// fragment - linear dynamic light
 	vec4_t lightVector;
 } vkUniform_t;
-
-#define VERTEX_BUFFER_SIZE (4 * 1024 * 1024)
-
-#define NUM_COMMAND_BUFFERS 2	// number of command buffers / render semaphores / framebuffer sets
-#define USE_SINGLE_FBO			// use single framebuffer set for all command buffers
-
-#define MIN_SWAPCHAIN_IMAGES_IMM 2
-#define MIN_SWAPCHAIN_IMAGES_FIFO 3
-#define MIN_SWAPCHAIN_IMAGES_MAILBOX 2
 
 #define TESS_IDX   (1)
 #define TESS_XYZ   (2)
@@ -378,8 +379,7 @@ typedef struct {
 
 		VkShaderModule st_fs[2];
 		VkShaderModule st_df_fs;
-		VkShaderModule mt_mul_fs[2];
-		VkShaderModule mt_add_fs[2];
+		VkShaderModule mt_fs[2];
 
 		VkShaderModule color_fs;
 		VkShaderModule color_clip_vs;
@@ -537,9 +537,9 @@ typedef struct {
 	//VkDescriptorSet current_descriptor_sets[ MAX_TEXTURE_UNITS ];
 
 	// This flag is used to decide whether framebuffer's depth attachment should be cleared
-	// with vmCmdClearAttachment (dirty_depth_attachment == true), or it have just been
-	// cleared by render pass instance clear op (dirty_depth_attachment == false).
-	qboolean dirty_depth_attachment;
+	// with vmCmdClearAttachment (dirty_depth_attachment != 0), or it have just been
+	// cleared by render pass instance clear op (dirty_depth_attachment == 0).
+	int dirty_depth_attachment;
 
 	float modelview_transform[16];
 } Vk_World;
