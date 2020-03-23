@@ -71,14 +71,14 @@ void R_BindAnimatedImage( const textureBundle_t *bundle ) {
 		return;
 	}
 
-	if ( bundle->isScreenMap && backEnd.viewParms.frameSceneNum == 1 ) {
+	if ( bundle->isScreenMap /*&& backEnd.viewParms.frameSceneNum == 1*/ ) {
 		if ( !backEnd.screenMapDone )
 			GL_Bind( tr.blackImage );
 		else
 #ifdef USE_SINGLE_FBO
-			vk_update_descriptor( 1, vk.color_descriptor3 );
+			vk_update_descriptor( glState.currenttmu + 1, vk.color_descriptor3 );
 #else
-			vk_update_descriptor( 1, vk.cmd->color_descriptor3 );
+			vk_update_descriptor( glState.currenttmu + 1, vk.cmd->color_descriptor3 );
 #endif
 		return;
 	}
@@ -313,12 +313,6 @@ static void DrawMultitextured( const shaderCommands_t *input, int stage ) {
 	pStage = tess.xstages[ stage ];
 
 	GL_State( pStage->stateBits );
-
-	// this is an ugly hack to work around a GeForce driver
-	// bug with multitexture and clip planes
-	if ( backEnd.viewParms.portalView != PV_NONE ) {
-		qglPolygonMode( GL_FRONT_AND_BACK, GL_FILL );
-	}
 
 	if ( !setArraysOnce ) {
 		R_ComputeColors( pStage );
@@ -964,12 +958,11 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 			GL_SelectTexture( 1 );
 			R_BindAnimatedImage( &pStage->bundle[1] );
 		}
-	
-		switch ( backEnd.viewParms.portalView ) {
-			default: pipeline = pStage->vk_pipeline[ fog_stage ]; break;
-			case PV_PORTAL: pipeline = pStage->vk_portal_pipeline[ fog_stage ]; break;
-			case PV_MIRROR: pipeline = pStage->vk_mirror_pipeline[ fog_stage ]; break;
-		}
+
+		if ( backEnd.viewParms.portalView == PV_MIRROR )
+			pipeline = pStage->vk_mirror_pipeline[ fog_stage ];
+		else
+			pipeline = pStage->vk_pipeline[ fog_stage ];
 
 		GL_SelectTexture( 0 );
 		if ( r_lightmap->integer && multitexture )
@@ -981,11 +974,10 @@ static void RB_IterateStagesGeneric( const shaderCommands_t *input )
 		vk_draw_geometry( pipeline, tess.depthRange, qtrue );
 
 		if ( pStage->depthFragment ) {
-			switch ( backEnd.viewParms.portalView ) {
-				default: pipeline = pStage->vk_pipeline_df; break;
-				case PV_PORTAL: pipeline = pStage->vk_portal_pipeline_df; break;
-				case PV_MIRROR: pipeline = pStage->vk_mirror_pipeline_df; break;
-			}
+			if ( backEnd.viewParms.portalView == PV_MIRROR )
+				pipeline = pStage->vk_mirror_pipeline_df;
+			else
+				pipeline = pStage->vk_pipeline_df;
 			vk_draw_geometry( pipeline, tess.depthRange, qtrue );
 		}
 #else
@@ -1119,7 +1111,6 @@ void VK_LightingPass( void )
 	const dlight_t *dl;
 	cullType_t cull;
 	int abs_light;
-	int clip;
 
 	if ( tess.shader->lightingStage < 0 )
 		return;
@@ -1146,17 +1137,12 @@ void VK_LightingPass( void )
 		return; // no space left...
 
 	cull = tess.shader->cullType;
-	if ( backEnd.viewParms.portalView != PV_NONE ) {
-		if ( backEnd.viewParms.portalView == PV_MIRROR ) {
-			switch ( cull ) {
-				case CT_FRONT_SIDED: cull = CT_BACK_SIDED; break;
-				case CT_BACK_SIDED: cull = CT_FRONT_SIDED; break;
-				default: break;
-			}
+	if ( backEnd.viewParms.portalView == PV_MIRROR ) {
+		switch ( cull ) {
+			case CT_FRONT_SIDED: cull = CT_BACK_SIDED; break;
+			case CT_BACK_SIDED: cull = CT_FRONT_SIDED; break;
+			default: break;
 		}
-		clip = 1;
-	} else {
-		clip = 0;
 	}
 
 	abs_light = /* (pStage->stateBits & GLS_ATEST_BITS) && */ (cull == CT_TWO_SIDED) ? 1 : 0;
@@ -1165,9 +1151,9 @@ void VK_LightingPass( void )
 		vk_bind_fog_image();
 
 	if ( dl->linear )
-		pipeline = vk.dlight1_pipelines_x[clip][cull][tess.shader->polygonOffset][fog_stage][abs_light];
+		pipeline = vk.dlight1_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 	else
-		pipeline = vk.dlight_pipelines_x[clip][cull][tess.shader->polygonOffset][fog_stage][abs_light];
+		pipeline = vk.dlight_pipelines_x[cull][tess.shader->polygonOffset][fog_stage][abs_light];
 
 	GL_SelectTexture( 0 );
 	R_BindAnimatedImage( &pStage->bundle[ 0 ] );

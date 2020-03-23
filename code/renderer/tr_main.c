@@ -465,42 +465,20 @@ static void R_SetFarClip( void )
 		vec3_t vecTo;
 		float distance;
 
-		if ( i & 1 )
-		{
-			v[0] = tr.viewParms.visBounds[0][0];
-		}
-		else
-		{
-			v[0] = tr.viewParms.visBounds[1][0];
-		}
-
-		if ( i & 2 )
-		{
-			v[1] = tr.viewParms.visBounds[0][1];
-		}
-		else
-		{
-			v[1] = tr.viewParms.visBounds[1][1];
-		}
-
-		if ( i & 4 )
-		{
-			v[2] = tr.viewParms.visBounds[0][2];
-		}
-		else
-		{
-			v[2] = tr.viewParms.visBounds[1][2];
-		}
+		v[0] = tr.viewParms.visBounds[(i>>0)&1][0];
+		v[1] = tr.viewParms.visBounds[(i>>1)&1][1];
+		v[2] = tr.viewParms.visBounds[(i>>2)&1][2];
 
 		VectorSubtract( v, tr.viewParms.or.origin, vecTo );
 
-		distance = vecTo[0] * vecTo[0] + vecTo[1] * vecTo[1] + vecTo[2] * vecTo[2];
+		distance = DotProduct( vecTo, vecTo );
 
 		if ( distance > farthestCornerDistance )
 		{
 			farthestCornerDistance = distance;
 		}
 	}
+
 	tr.viewParms.zFar = sqrt( farthestCornerDistance );
 }
 
@@ -590,11 +568,11 @@ void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum 
 	 * by setting the projection matrix appropriately.
 	 */
 
-	if(stereoSep != 0)
+	if ( stereoSep != 0 )
 	{
-		if(dest->stereoFrame == STEREO_LEFT)
+		if ( dest->stereoFrame == STEREO_LEFT )
 			stereoSep = zProj / stereoSep;
-		else if(dest->stereoFrame == STEREO_RIGHT)
+		else if ( dest->stereoFrame == STEREO_RIGHT )
 			stereoSep = zProj / -stereoSep;
 		else
 			stereoSep = 0;
@@ -625,8 +603,8 @@ void R_SetupProjection( viewParms_t *dest, float zProj, qboolean computeFrustum 
 	dest->projectionMatrix[15] = 0;
 	
 	// Now that we have all the data for the projection matrix we can also setup the view frustum.
-	if(computeFrustum)
-		R_SetupFrustum(dest, xmin, xmax, ymax, zProj, stereoSep);
+	if ( computeFrustum )
+		R_SetupFrustum( dest, xmin, xmax, ymax, zProj, stereoSep );
 }
 
 
@@ -647,6 +625,38 @@ static void R_SetupProjectionZ( viewParms_t *dest )
 	dest->projectionMatrix[6] = 0;
 	dest->projectionMatrix[10] = -( zFar + zNear ) / depth;
 	dest->projectionMatrix[14] = -2 * zFar * zNear / depth;
+
+	if ( dest->portalView != PV_NONE )
+	{
+		float	plane[4];
+		float	plane2[4];
+		vec4_t q, c;
+
+		// transform portal plane into camera space
+		plane[0] = dest->portalPlane.normal[0];
+		plane[1] = dest->portalPlane.normal[1];
+		plane[2] = dest->portalPlane.normal[2];
+		plane[3] = dest->portalPlane.dist;
+
+		plane2[0] = -DotProduct( dest->or.axis[1], plane );
+		plane2[1] =  DotProduct( dest->or.axis[2], plane );
+		plane2[2] = -DotProduct( dest->or.axis[0], plane );
+		plane2[3] =  DotProduct( plane, dest->or.origin) - plane[3];
+
+		// Lengyel, Eric. "Modifying the Projection Matrix to Perform Oblique Near-plane Clipping".
+		// Terathon Software 3D Graphics Library, 2004. http://www.terathon.com/code/oblique.html
+		q[0] = (SGN(plane2[0]) + dest->projectionMatrix[8]) / dest->projectionMatrix[0];
+		q[1] = (SGN(plane2[1]) + dest->projectionMatrix[9]) / dest->projectionMatrix[5];
+		q[2] = -1.0f;
+		q[3] = (1.0f + dest->projectionMatrix[10]) / dest->projectionMatrix[14];
+
+		VectorScale4( plane2, 2.0f / DotProduct4(plane2, q), c );
+
+		dest->projectionMatrix[2]  = c[0];
+		dest->projectionMatrix[6]  = c[1];
+		dest->projectionMatrix[10] = c[2] + 1.0f;
+		dest->projectionMatrix[14] = c[3];
+	}
 }
 
 
@@ -722,7 +732,7 @@ static void R_PlaneForSurface( const surfaceType_t *surfType, cplane_t *plane ) 
 		return;
 	default:
 		Com_Memset (plane, 0, sizeof(*plane));
-		plane->normal[0] = 1;		
+		plane->normal[0] = 1;
 		return;
 	}
 }
@@ -1048,14 +1058,29 @@ static void R_GetModelViewBounds( int *mins, int *maxs )
 	for ( i = 0; i < tess.numVertexes; i++ ) {
 		R_TransformModelToClipMVP( tess.xyz[i], mvp, clip );
 		if ( clip[3] <= 0.0 ) {
-			dist[0] = DotProduct( tess.xyz[i], tr.viewParms.frustum[0].normal );
-			dist[1] = DotProduct( tess.xyz[i], tr.viewParms.frustum[1].normal );
-			dist[2] = DotProduct( tess.xyz[i], tr.viewParms.frustum[2].normal );
-			dist[3] = DotProduct( tess.xyz[i], tr.viewParms.frustum[3].normal );
-			if ( dist[0] <= tr.viewParms.frustum[0].dist ) maxn[0] =  1.0f;
-			if ( dist[1] <= tr.viewParms.frustum[1].dist ) minn[0] = -1.0f;
-			if ( dist[2] <= tr.viewParms.frustum[2].dist ) minn[1] = -1.0f;
-			if ( dist[3] <= tr.viewParms.frustum[3].dist ) maxn[1] =  1.0f;
+			dist[0] = DotProduct( tess.xyz[i], tr.viewParms.frustum[0].normal ) - tr.viewParms.frustum[0].dist; // right
+			dist[1] = DotProduct( tess.xyz[i], tr.viewParms.frustum[1].normal ) - tr.viewParms.frustum[1].dist; // left
+			dist[2] = DotProduct( tess.xyz[i], tr.viewParms.frustum[2].normal ) - tr.viewParms.frustum[2].dist; // bottom
+			dist[3] = DotProduct( tess.xyz[i], tr.viewParms.frustum[3].normal ) - tr.viewParms.frustum[3].dist; // top
+			if ( dist[0] <= 0 && dist[1] <= 0 ) {
+				if ( dist[0] < dist[1] ) {
+					maxn[0] =  1.0f;
+				} else {
+					minn[0] = -1.0f;
+				}
+			} else {
+				if ( dist[0] <= 0 ) maxn[0] =  1.0f;
+				if ( dist[1] <= 0 ) minn[0] = -1.0f;
+			}
+			if ( dist[2] <= 0 && dist[3] <= 0 ) {
+				if ( dist[2] < dist[3] )
+					minn[1] = -1.0f;
+				else
+					maxn[1] =  1.0f;
+			} else {
+				if ( dist[2] <= 0 ) minn[1] = -1.0f;
+				if ( dist[3] <= 0 ) maxn[1] =  1.0f;
+			}
 		} else {
 			for ( j = 0; j < 2; j++ ) {
 				if ( clip[j] >  clip[3] ) clip[j] =  clip[3]; else
@@ -1146,7 +1171,7 @@ static qboolean R_MirrorViewBySurface( const drawSurf_t *drawSurf, int entityNum
 
 	VectorSubtract( vec3_origin, camera.axis[0], newParms.portalPlane.normal );
 	newParms.portalPlane.dist = DotProduct( camera.origin, newParms.portalPlane.normal );
-	
+
 	R_MirrorVector (oldParms.or.axis[0], &surface, &camera, newParms.or.axis[0]);
 	R_MirrorVector (oldParms.or.axis[1], &surface, &camera, newParms.or.axis[1]);
 	R_MirrorVector (oldParms.or.axis[2], &surface, &camera, newParms.or.axis[2]);
@@ -1656,7 +1681,7 @@ void R_RenderView( const viewParms_t *parms ) {
 	// set viewParms.world
 	R_RotateForViewer();
 
-	R_SetupProjection(&tr.viewParms, r_zproj->value, qtrue);
+	R_SetupProjection( &tr.viewParms, r_zproj->value, qtrue );
 
 	R_GenerateDrawSurfs();
 

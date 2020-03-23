@@ -171,7 +171,6 @@ typedef char GLchar;
 	GLE( void, glClear, GLbitfield mask ) \
 	GLE( void, glClearColor, GLclampf red, GLclampf green, GLclampf blue, GLclampf alpha ) \
 	GLE( void, glClearDepth, GLclampd depth ) \
-	GLE( void, glClipPlane, GLenum plane, const GLdouble *equation ) \
 	GLE( void, glColor4f, GLfloat red, GLfloat green, GLfloat blue, GLfloat alpha ) \
 	GLE( void, glColorMask, GLboolean red, GLboolean green, GLboolean blue, GLboolean alpha ) \
 	GLE( void, glColorPointer, GLint size, GLenum type, GLsizei stride, const GLvoid *pointer ) \
@@ -193,7 +192,6 @@ typedef char GLchar;
 	GLE( GLenum, glGetError, void ) \
 	GLE( void, glGetIntegerv, GLenum pname, GLint *params ) \
 	GLE( const GLubyte*, glGetString, GLenum name ) \
-	GLE( void, glHint, GLenum target, GLenum mode ) \
 	GLE( void, glLineWidth, GLfloat width ) \
 	GLE( void, glLoadIdentity, void ) \
 	GLE( void, glLoadMatrixf, const GLfloat *m ) \

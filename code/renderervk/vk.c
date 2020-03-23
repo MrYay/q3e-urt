@@ -388,7 +388,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[2].samples = vkSamples;
 		attachments[2].loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // Intermediate storage (not written)
-		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[2].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		attachments[2].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -517,7 +517,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[2].samples = vk.screenMapSamples;
 		attachments[2].loadOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[2].storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+		attachments[2].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[2].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
 		attachments[2].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 		attachments[2].finalLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -1910,7 +1910,6 @@ static void vk_create_persistent_pipelines( void )
 			def.shader_type = TYPE_SIGNLE_TEXTURE;
 			def.face_culling = CT_FRONT_SIDED;
 			def.polygon_offset = qfalse;
-			def.clipping_plane = qfalse;
 			def.mirror = qfalse;
 			vk.skybox_pipeline = vk_find_pipeline_ext( 0, &def, qtrue );
 		}
@@ -1927,7 +1926,6 @@ static void vk_create_persistent_pipelines( void )
 				def.polygon_offset = qfalse;
 				def.state_bits = 0;
 				def.shader_type = TYPE_SIGNLE_TEXTURE;
-				def.clipping_plane = qfalse;
 				def.shadow_phase = SHADOW_EDGES;
 
 				for (i = 0; i < 2; i++) {
@@ -1947,7 +1945,6 @@ static void vk_create_persistent_pipelines( void )
 				def.polygon_offset = qfalse;
 				def.state_bits = GLS_DEPTHMASK_TRUE | GLS_SRCBLEND_DST_COLOR | GLS_DSTBLEND_ZERO;
 				def.shader_type = TYPE_SIGNLE_TEXTURE;
-				def.clipping_plane = qfalse;
 				def.mirror = qfalse;
 				def.shadow_phase = SHADOW_FS_QUAD;
 				def.primitives = TRIANGLE_STRIP;
@@ -1968,12 +1965,10 @@ static void vk_create_persistent_pipelines( void )
 				GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL			// additive
 			};
 			qboolean polygon_offset[2] = { qfalse, qtrue };
-			qboolean clipping_plane[2] = { qfalse, qtrue };
-			int i, j, k, l, m;
+			int i, j, k, l;
 
 			Com_Memset(&def, 0, sizeof(def));
 			def.shader_type = TYPE_SIGNLE_TEXTURE;
-			def.clipping_plane = qfalse;
 			def.mirror = qfalse;
 
 			for (i = 0; i < 2; i++) {
@@ -2007,21 +2002,18 @@ static void vk_create_persistent_pipelines( void )
 #ifdef USE_PMLIGHT
 			def.state_bits = GLS_SRCBLEND_ONE | GLS_DSTBLEND_ONE | GLS_DEPTHFUNC_EQUAL;
 			//def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
-			for ( i = 0; i < 2; i++ ) { // clipping plane off/on
-				def.clipping_plane = clipping_plane[i];
-				for (j = 0; j < 3; j++) { // cullType
-					def.face_culling = j;
-					for ( k = 0; k < 2; k++ ) { // polygonOffset
-						def.polygon_offset = polygon_offset[k];
+			for (i = 0; i < 3; i++) { // cullType
+				def.face_culling = i;
+				for ( j = 0; j < 2; j++ ) { // polygonOffset
+					def.polygon_offset = polygon_offset[j];
+					for ( k = 0; k < 2; k++ ) {
+						def.fog_stage = k; // fogStage
 						for ( l = 0; l < 2; l++ ) {
-							def.fog_stage = l; // fogStage
-							for ( m = 0; m < 2; m++ ) {
-								def.abs_light = m;
-								def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
-								vk.dlight_pipelines_x[i][j][k][l][m] = vk_find_pipeline_ext( 0, &def, qfalse );
-								def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING1;
-								vk.dlight1_pipelines_x[i][j][k][l][m] = vk_find_pipeline_ext( 0, &def, qfalse );
-							}
+							def.abs_light = l;
+							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING;
+							vk.dlight_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
+							def.shader_type = TYPE_SIGNLE_TEXTURE_LIGHTING1;
+							vk.dlight1_pipelines_x[i][j][k][l] = vk_find_pipeline_ext( 0, &def, qfalse );
 						}
 					}
 				}
@@ -3112,7 +3104,7 @@ void vk_initialize( void )
 
 		push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
 		push_range.offset = 0;
-		push_range.size = 128; // 32 floats
+		push_range.size = 64; // 16 floats
 
 		// standard pipelines
 
@@ -3944,7 +3936,7 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	Com_Memset( vert_spec_data, 0, sizeof( vert_spec_data ) );
 	Com_Memset( frag_spec_data, 0, sizeof( frag_spec_data ) );
 	
-	vert_spec_data[0] = def->clipping_plane ? 1 : 0;
+	//vert_spec_data[0] = def->clipping_plane ? 1 : 0;
 
 	// fragment shader specialization data
 	atest_bits = state_bits & GLS_ATEST_BITS;
@@ -4211,7 +4203,11 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	depth_stencil_state.flags = 0;
 	depth_stencil_state.depthTestEnable = (state_bits & GLS_DEPTHTEST_DISABLE) ? VK_FALSE : VK_TRUE;
 	depth_stencil_state.depthWriteEnable = (state_bits & GLS_DEPTHMASK_TRUE) ? VK_TRUE : VK_FALSE;
+#ifdef USE_REVERSED_DEPTH
+	depth_stencil_state.depthCompareOp = (state_bits & GLS_DEPTHFUNC_EQUAL) ? VK_COMPARE_OP_EQUAL : VK_COMPARE_OP_GREATER_OR_EQUAL;
+#else
 	depth_stencil_state.depthCompareOp = (state_bits & GLS_DEPTHFUNC_EQUAL) ? VK_COMPARE_OP_EQUAL : VK_COMPARE_OP_LESS_OR_EQUAL;
+#endif
 	depth_stencil_state.depthBoundsTestEnable = VK_FALSE;
 	depth_stencil_state.stencilTestEnable = (def->shadow_phase != SHADOW_DISABLED) ? VK_TRUE : VK_FALSE;
 
@@ -4560,6 +4556,24 @@ static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range) {
 
 	switch ( depth_range ) {
 		default:
+#ifdef USE_REVERSED_DEPTH
+		//case DEPTH_RANGE_NORMAL:
+			viewport->minDepth = 0.0f;
+			viewport->maxDepth = 1.0f;
+			break;
+		case DEPTH_RANGE_ZERO:
+			viewport->minDepth = 1.0f;
+			viewport->maxDepth = 1.0f;
+			break;
+		case DEPTH_RANGE_ONE:
+			viewport->minDepth = 0.0f;
+			viewport->maxDepth = 0.0f;
+			break;
+		case DEPTH_RANGE_WEAPON:
+			viewport->minDepth = 0.6f;
+			viewport->maxDepth = 1.0f;
+			break;
+#else
 		//case DEPTH_RANGE_NORMAL:
 			viewport->minDepth = 0.0f;
 			viewport->maxDepth = 1.0f;
@@ -4576,6 +4590,7 @@ static void get_viewport(VkViewport *viewport, Vk_Depth_Range depth_range) {
 			viewport->minDepth = 0.0f;
 			viewport->maxDepth = 0.3f;
 			break;
+#endif
 	}
 }
 
@@ -4614,8 +4629,13 @@ static void get_mvp_transform( float *mvp )
 
 		mvp[0]  =  mvp0; mvp[1]  =  0.0f; mvp[2]  = 0.0f; mvp[3]  = 0.0f;
 		mvp[4]  =  0.0f; mvp[5]  =  mvp5; mvp[6]  = 0.0f; mvp[7]  = 0.0f;
+#ifdef USE_REVERSED_DEPTH
+		mvp[8]  =  0.0f; mvp[9]  =  0.0f; mvp[10] = 0.0f; mvp[11] = 0.0f;
+		mvp[12] = -1.0f; mvp[13] = -1.0f; mvp[14] = 1.0f; mvp[15] = 1.0f;
+#else
 		mvp[8]  =  0.0f; mvp[9]  =  0.0f; mvp[10] = 1.0f; mvp[11] = 0.0f;
 		mvp[12] = -1.0f; mvp[13] = -1.0f; mvp[14] = 0.0f; mvp[15] = 1.0f;
+#endif
 	}
 	else
 	{
@@ -4625,9 +4645,8 @@ static void get_mvp_transform( float *mvp )
 
 		// update q3's proj matrix (opengl) to vulkan conventions: z - [0, 1] instead of [-1, 1] and invert y direction
 		proj[5] = -p[5];
-		proj[10] = ( p[10] - 1.0f ) / 2.0f;
-		proj[14] = p[14] / 2.0f;
-
+		//proj[10] = ( p[10] - 1.0f ) / 2.0f;
+		//proj[14] = p[14] / 2.0f;
 		myGlMultMatrix( vk_world.modelview_transform, proj, mvp );
 	}
 }
@@ -4687,7 +4706,11 @@ void vk_clear_depth( qboolean clear_stencil ) {
 		return;
 
 	attachment.colorAttachment = 0;
+#ifdef USE_REVERSED_DEPTH
+	attachment.clearValue.depthStencil.depth = 0.0f;
+#else
 	attachment.clearValue.depthStencil.depth = 1.0f;
+#endif
 	attachment.clearValue.depthStencil.stencil = 0;
 	if ( clear_stencil ) {
 		attachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT | VK_IMAGE_ASPECT_STENCIL_BIT;
@@ -4704,52 +4727,19 @@ void vk_clear_depth( qboolean clear_stencil ) {
 
 
 void vk_update_mvp( const float *m ) {
-	float push_constants[16 + 12 + 4]; // mvp transform + eye transform + clipping plane in eye space
-	int push_constants_size = 64;
-	int i;
+	float push_constants[16]; // mvp transform
 
 	//
 	// Specify push constants.
 	//
 	if ( m )
-		Com_Memcpy( push_constants, m, push_constants_size );
+		Com_Memcpy( push_constants, m, sizeof( push_constants ) );
 	else
 		get_mvp_transform( push_constants );
 
-	if ( backEnd.viewParms.portalView != PV_NONE ) {
-		// Eye space transform.
-		// NOTE: backEnd.or.modelMatrix incorporates s_flipMatrix, so it should be taken into account 
-		// when computing clipping plane too.
-		float* eye_xform = push_constants + 16;
-		float world_plane[4];
-		float eye_plane[4];
-		for (i = 0; i < 12; i++) {
-			eye_xform[i] = backEnd.or.modelMatrix[(i%4)*4 + i/4 ];
-		}
+	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof( push_constants ), push_constants );
 
-		// Clipping plane in eye coordinates.
-		world_plane[0] = backEnd.viewParms.portalPlane.normal[0];
-		world_plane[1] = backEnd.viewParms.portalPlane.normal[1];
-		world_plane[2] = backEnd.viewParms.portalPlane.normal[2];
-		world_plane[3] = backEnd.viewParms.portalPlane.dist;
-
-		eye_plane[0] = DotProduct (backEnd.viewParms.or.axis[0], world_plane);
-		eye_plane[1] = DotProduct (backEnd.viewParms.or.axis[1], world_plane);
-		eye_plane[2] = DotProduct (backEnd.viewParms.or.axis[2], world_plane);
-		eye_plane[3] = DotProduct (world_plane, backEnd.viewParms.or.origin) - world_plane[3];
-
-		// Apply s_flipMatrix to be in the same coordinate system as eye_xfrom.
-		push_constants[28] = -eye_plane[1];
-		push_constants[29] =  eye_plane[2];
-		push_constants[30] = -eye_plane[0];
-		push_constants[31] =  eye_plane[3];
-
-		push_constants_size += 64;
-	}
-
-	qvkCmdPushConstants( vk.cmd->command_buffer, vk.pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0, push_constants_size, push_constants );
-
-	vk.stats.push_size += push_constants_size;
+	vk.stats.push_size += sizeof( push_constants );
 }
 
 
@@ -5009,7 +4999,9 @@ static void vk_begin_render_pass( VkRenderPass renderPass, VkFramebuffer frameBu
 		// [1] - depth/stencil
 		// [2] - multisampled color, optional
 		Com_Memset( clear_values, 0, sizeof( clear_values ) );
+#ifndef USE_REVERSED_DEPTH
 		clear_values[1].depthStencil.depth = 1.0;
+#endif
 		render_pass_begin_info.clearValueCount = ARRAY_LEN( clear_values );
 		render_pass_begin_info.pClearValues = clear_values;
 	} else {

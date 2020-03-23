@@ -35,6 +35,8 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 //#define USE_TESS_NEEDS_NORMAL
 //#define USE_TESS_NEEDS_ST2
 
+//#define USE_SKY_DEPTH_WRITE
+
 #include "../qcommon/q_shared.h"
 #include "../qcommon/qfiles.h"
 #include "../qcommon/qcommon.h"
@@ -357,11 +359,9 @@ typedef struct {
 	uint32_t		tessFlags;
 
 	uint32_t		vk_pipeline[2]; // normal,fogged
-	uint32_t		vk_portal_pipeline[2];
 	uint32_t		vk_mirror_pipeline[2];
 
 	uint32_t		vk_pipeline_df; // depthFragment
-	uint32_t		vk_portal_pipeline_df;
 	uint32_t		vk_mirror_pipeline_df;
 #endif
 

@@ -24,17 +24,6 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 backEndData_t	*backEndData;
 backEndState_t	backEnd;
 
-
-static const float s_flipMatrix[16] = {
-	// convert from our coordinate system (looking down X)
-	// to OpenGL's coordinate system (looking down -Z)
-	0, 0, -1, 0,
-	-1, 0, 0, 0,
-	0, 1, 0, 0,
-	0, 0, 0, 1
-};
-
-
 const float *GL_Ortho( const float left, const float right, const float bottom, const float top, const float znear, const float zfar )
 {
 	static float m[ 16 ] = { 0 };
@@ -536,28 +525,6 @@ static void RB_BeginDrawingView( void ) {
 
 	// we will only draw a sun if there was sky rendered in this view
 	backEnd.skyRenderedThisView = qfalse;
-
-	// clip to the plane of the portal
-	if ( backEnd.viewParms.portalView != PV_NONE ) {
-		float	plane[4];
-		GLdouble plane2[4];
-
-		plane[0] = backEnd.viewParms.portalPlane.normal[0];
-		plane[1] = backEnd.viewParms.portalPlane.normal[1];
-		plane[2] = backEnd.viewParms.portalPlane.normal[2];
-		plane[3] = backEnd.viewParms.portalPlane.dist;
-
-		plane2[0] = DotProduct( backEnd.viewParms.or.axis[0], plane );
-		plane2[1] = DotProduct( backEnd.viewParms.or.axis[1], plane );
-		plane2[2] = DotProduct( backEnd.viewParms.or.axis[2], plane );
-		plane2[3] = DotProduct( plane, backEnd.viewParms.or.origin) - plane[3];
-
-		qglLoadMatrixf( s_flipMatrix );
-		qglClipPlane( GL_CLIP_PLANE0, plane2 );
-		qglEnable( GL_CLIP_PLANE0 );
-	} else {
-		qglDisable( GL_CLIP_PLANE0 );
-	}
 }
 
 #ifdef USE_PMLIGHT
@@ -776,28 +743,6 @@ static void RB_BeginDrawingLitSurfs( void )
 	SetViewportAndScissor();
 
 	glState.faceCulling = -1;		// force face culling to set next time
-
-	// clip to the plane of the portal
-	if ( backEnd.viewParms.portalView != PV_NONE ) {
-		float	plane[4];
-		GLdouble plane2[4];
-
-		plane[0] = backEnd.viewParms.portalPlane.normal[0];
-		plane[1] = backEnd.viewParms.portalPlane.normal[1];
-		plane[2] = backEnd.viewParms.portalPlane.normal[2];
-		plane[3] = backEnd.viewParms.portalPlane.dist;
-
-		plane2[0] = DotProduct( backEnd.viewParms.or.axis[0], plane );
-		plane2[1] = DotProduct( backEnd.viewParms.or.axis[1], plane );
-		plane2[2] = DotProduct( backEnd.viewParms.or.axis[2], plane );
-		plane2[3] = DotProduct( plane, backEnd.viewParms.or.origin ) - plane[3];
-
-		qglLoadMatrixf( s_flipMatrix );
-		qglClipPlane( GL_CLIP_PLANE0, plane2 );
-		qglEnable( GL_CLIP_PLANE0 );
-	} else {
-		qglDisable( GL_CLIP_PLANE0 );
-	}
 }
 
 
