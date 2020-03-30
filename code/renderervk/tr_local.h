@@ -26,6 +26,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #define USE_VBO				// store static world geometry in VBO
 #define USE_FOG_ONLY
 #define USE_FOG_COLLAPSE
+#if defined (USE_VBO) && !defined(USE_FOG_ONLY)
+#define USE_FOG_ONLY
+#endif
 //#define USE_LEGACY_DLIGHTS	// vq3 dynamic lights
 #define USE_PMLIGHT			// promode dynamic lights via \r_dlightMode 1|2
 #define MAX_REAL_DLIGHTS	(MAX_DLIGHTS*2)
@@ -66,6 +69,7 @@ typedef enum {
 	GL_LINEAR_MIPMAP_LINEAR,
 	GL_MODULATE,
 	GL_ADD,
+	GL_ADD_2,
 	GL_DECAL,
 	GL_BACK_LEFT,
 	GL_BACK_RIGHT
@@ -332,7 +336,11 @@ typedef struct {
 	qboolean		isScreenMap;
 } textureBundle_t;
 
+#ifdef USE_VULKAN
+#define NUM_TEXTURE_BUNDLES 3
+#else
 #define NUM_TEXTURE_BUNDLES 2
+#endif
 
 typedef struct {
 	qboolean		active;
@@ -349,6 +357,7 @@ typedef struct {
 
 	unsigned		stateBits;					// GLS_xxxx mask
 	GLint			mtEnv;						// 0, GL_MODULATE, GL_ADD, GL_DECAL
+	GLint			mtEnv2;						// 0, GL_MODULATE, GL_ADD, GL_DECAL
 
 	acff_t			adjustColorsForFog;
 
@@ -367,7 +376,7 @@ typedef struct {
 
 #ifdef USE_VBO
 	uint32_t		color_offset; // within current shader
-	uint32_t		tex_offset[2]; // within current shader
+	uint32_t		tex_offset[NUM_TEXTURE_BUNDLES]; // within current shader
 #endif
 
 } shaderStage_t;
@@ -513,6 +522,9 @@ typedef struct {
 #ifdef USE_PMLIGHT
 	int			numLitSurfs;
 	struct litSurf_s	*litSurfs;
+#endif
+#ifdef USE_VULKAN
+	qboolean	switchRenderPass;
 #endif
 } trRefdef_t;
 
@@ -1104,6 +1116,8 @@ typedef struct {
 
 } backEndState_t;
 
+typedef struct drawSurfsCommand_s drawSurfsCommand_t;
+
 /*
 ** trGlobals_t 
 **
@@ -1206,10 +1220,15 @@ typedef struct {
 	float					fogTable[FOG_TABLE_SIZE];
 
 	qboolean				mapLoading;
-	qboolean				needScreenMap;
+
+	int						needScreenMap;
+#ifdef USE_VULKAN
+	drawSurfsCommand_t		*drawSurfCmd;
+	int						numDrawSurfCmds;
+	int						lastRenderCommand;
+#endif
 
 	qboolean				vertexLightingAllowed;
-
 } trGlobals_t;
 
 extern backEndState_t	backEnd;
@@ -1496,7 +1515,7 @@ typedef struct stageVars
 {
 	color4ub_t	colors[SHADER_MAX_VERTEXES*2]; // 2x needed for shadows
 	vec2_t		texcoords[NUM_TEXTURE_BUNDLES][SHADER_MAX_VERTEXES];
-	vec2_t		*texcoordPtr[2];
+	vec2_t		*texcoordPtr[NUM_TEXTURE_BUNDLES];
 } stageVars_t;
 
 typedef struct shaderCommands_s 
@@ -1821,7 +1840,7 @@ typedef struct {
 	float	s2, t2;
 } stretchPicCommand_t;
 
-typedef struct {
+typedef struct drawSurfsCommand_s {
 	int		commandId;
 	trRefdef_t	refdef;
 	viewParms_t	viewParms;

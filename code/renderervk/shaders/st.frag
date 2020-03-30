@@ -1,6 +1,6 @@
 #version 450
 
-layout(set = 1, binding = 0) uniform sampler2D texture0; // diffuse
+layout(set = 2, binding = 0) uniform sampler2D texture0; // diffuse
 
 layout(location = 0) in vec4 frag_color;
 layout(location = 1) centroid in vec2 frag_tex_coord;
@@ -11,6 +11,7 @@ layout (constant_id = 0) const int alpha_test_func = 0;
 layout (constant_id = 1) const float alpha_test_value = 0.0;
 //layout (constant_id = 2) const float depth_fragment = 0.85;
 layout (constant_id = 3) const int alpha_to_coverage = 0;
+layout (constant_id = 7) const int discard_mode = 0;
 
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
 {
@@ -24,23 +25,35 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 }
 
 void main() {
-	out_color = frag_color * texture(texture0, frag_tex_coord);
+	vec4 base = texture(texture0, frag_tex_coord) * frag_color;
 
 	if (alpha_to_coverage != 0) {
 		if (alpha_test_func == 1) {
-			out_color.a = CorrectAlpha(alpha_test_value, out_color.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord);
 		} else if (alpha_test_func == 2) {
-			out_color.a = CorrectAlpha(alpha_test_value, 1.0 - out_color.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, 1.0 - base.a, frag_tex_coord);
 		} else if (alpha_test_func == 3) {
-			out_color.a = CorrectAlpha(alpha_test_value, out_color.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord);
 		}
 	} else
 	// specialization: alpha-test function
 	if (alpha_test_func == 1) {
-		if (out_color.a == alpha_test_value) discard;
+		if (base.a == alpha_test_value) discard;
 	} else if (alpha_test_func == 2) {
-		if (out_color.a >= alpha_test_value) discard;
+		if (base.a >= alpha_test_value) discard;
 	} else if (alpha_test_func == 3) {
-		if (out_color.a < alpha_test_value) discard;
+		if (base.a < alpha_test_value) discard;
 	}
+
+	if ( discard_mode == 1 ) {
+		if ( base.a == 0.0 ) {
+			discard;
+		}
+	} else if ( discard_mode == 2 ) {
+		if ( dot( base.rgb, base.rgb ) == 0.0 ) {
+			discard;
+		}
+	}
+
+	out_color = base;
 }

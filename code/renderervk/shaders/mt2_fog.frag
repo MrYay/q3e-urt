@@ -14,15 +14,16 @@ layout(set = 1, binding = 0) uniform UBO {
 	// linear dynamic light
 	vec4 lightVector;
 };
-layout(set = 2, binding = 0) uniform sampler2D texture0; // diffuse
-//layout(set = 3, binding = 0) uniform sampler2D texture1; // lightmap
-//layout(set = 4, binding = 0) uniform sampler2D texture2; // blend
+layout(set = 2, binding = 0) uniform sampler2D texture0;
+layout(set = 3, binding = 0) uniform sampler2D texture1;
+layout(set = 4, binding = 0) uniform sampler2D texture2;
 layout(set = 5, binding = 0) uniform sampler2D fog_texture;
 
 layout(location = 0) in vec4 frag_color;
-layout(location = 1) centroid in vec2 frag_tex_coord;
-//layout(location = 2) centroid in vec2 frag_tex_coord1;
-layout(location = 3) centroid in vec2 fog_tex_coord; // fog
+layout(location = 1) centroid in vec2 frag_tex_coord0;
+layout(location = 2) centroid in vec2 frag_tex_coord1;
+layout(location = 3) centroid in vec2 frag_tex_coord2;
+layout(location = 4) in vec2 fog_tex_coord;
 
 layout(location = 0) out vec4 out_color;
 
@@ -30,6 +31,9 @@ layout (constant_id = 0) const int alpha_test_func = 0;
 layout (constant_id = 1) const float alpha_test_value = 0.0;
 //layout (constant_id = 2) const float depth_fragment = 0.85;
 layout (constant_id = 3) const int alpha_to_coverage = 0;
+//layout (constant_id = 4) const int color_mode = 0;
+//layout (constant_id = 5) const int abs_light = 0;
+layout (constant_id = 6) const int tex_mode = 0; // modulate, add, add2
 layout (constant_id = 7) const int discard_mode = 0;
 
 float CorrectAlpha(float threshold, float alpha, vec2 tc)
@@ -44,25 +48,43 @@ float CorrectAlpha(float threshold, float alpha, vec2 tc)
 }
 
 void main() {
-	vec4 base = frag_color * texture(texture0, frag_tex_coord);
+	vec4 color_a = texture(texture0, frag_tex_coord0) * frag_color;
 	vec4 fog = texture(fog_texture, fog_tex_coord);
+	vec4 base;
+
+	if ( tex_mode == 1 ) {
+		// add
+		vec4 color_b = texture(texture1, frag_tex_coord1);
+		vec4 color_c = texture(texture2, frag_tex_coord2);
+		base = vec4(color_a.rgb + color_b.rgb + color_c.rgb, color_a.a * color_b.a * color_c.a);
+	} else if ( tex_mode == 2 )	{
+		// add2
+		vec4 color_b = texture(texture1, frag_tex_coord1) * frag_color;
+		vec4 color_c = texture(texture2, frag_tex_coord2) * frag_color;
+		base = vec4(color_a.rgb + color_b.rgb + color_c.rgb, color_a.a * color_b.a * color_c.a);
+	}else {
+		// modulate
+		vec4 color_b = texture(texture1, frag_tex_coord1);
+		vec4 color_c = texture(texture2, frag_tex_coord2);
+		base = color_a * color_b * color_c;
+	}
 
 	if (alpha_to_coverage != 0) {
 		if (alpha_test_func == 1) {
-			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord0);
 		} else if (alpha_test_func == 2) {
-			base.a = CorrectAlpha(alpha_test_value, 1.0 - base.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, 1.0 - base.a, frag_tex_coord0);
 		} else if (alpha_test_func == 3) {
-			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord);
+			base.a = CorrectAlpha(alpha_test_value, base.a, frag_tex_coord0);
 		}
 	} else
 	// specialization: alpha-test function
 	if (alpha_test_func == 1) {
-		if (base.a == alpha_test_value) discard;
+		if (color_a.a == alpha_test_value) discard;
 	} else if (alpha_test_func == 2) {
-		if (base.a >= alpha_test_value) discard;
+		if (color_a.a >= alpha_test_value) discard;
 	} else if (alpha_test_func == 3) {
-		if (base.a < alpha_test_value) discard;
+		if (color_a.a < alpha_test_value) discard;
 	}
 
 	base = mix( base, fog * fogColor, fog.a );

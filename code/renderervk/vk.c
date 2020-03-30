@@ -176,10 +176,83 @@ static VkFlags get_composite_alpha( VkCompositeAlphaFlagsKHR flags )
 */
 
 
+static VkCommandBuffer begin_command_buffer( void )
+{
+	VkCommandBufferBeginInfo begin_info;
+	VkCommandBufferAllocateInfo alloc_info;
+	VkCommandBuffer command_buffer;
+
+	alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	alloc_info.pNext = NULL;
+	alloc_info.commandPool = vk.command_pool;
+	alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	alloc_info.commandBufferCount = 1;
+	VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &command_buffer ) );
+
+	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	begin_info.pNext = NULL;
+	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	begin_info.pInheritanceInfo = NULL;
+
+	VK_CHECK( qvkBeginCommandBuffer( command_buffer, &begin_info ) );
+
+	return command_buffer;
+}
+
+
+static void end_command_buffer( VkCommandBuffer command_buffer )
+{
+	VkSubmitInfo submit_info;
+	VkCommandBuffer cmdbuf[1];
+
+	cmdbuf[0] = command_buffer;
+
+	VK_CHECK( qvkEndCommandBuffer( command_buffer ) );
+
+	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+	submit_info.pNext = NULL;
+	submit_info.waitSemaphoreCount = 0;
+	submit_info.pWaitSemaphores = NULL;
+	submit_info.pWaitDstStageMask = NULL;
+	submit_info.commandBufferCount = 1;
+	submit_info.pCommandBuffers = cmdbuf;
+	submit_info.signalSemaphoreCount = 0;
+	submit_info.pSignalSemaphores = NULL;
+
+	VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, VK_NULL_HANDLE ) );
+	VK_CHECK( qvkQueueWaitIdle( vk.queue ) );
+
+	qvkFreeCommandBuffers( vk.device, vk.command_pool, 1, cmdbuf );
+}
+
+
+static void record_image_layout_transition(VkCommandBuffer command_buffer, VkImage image, VkImageAspectFlags image_aspect_flags, VkAccessFlags src_access_flags, VkImageLayout old_layout, VkAccessFlags dst_access_flags, VkImageLayout new_layout) {
+	VkImageMemoryBarrier barrier;
+
+	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+	barrier.pNext = NULL;
+	barrier.srcAccessMask = src_access_flags;
+	barrier.dstAccessMask = dst_access_flags;
+	barrier.oldLayout = old_layout;
+	barrier.newLayout = new_layout;
+	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	barrier.image = image;
+	barrier.subresourceRange.aspectMask = image_aspect_flags;
+	barrier.subresourceRange.baseMipLevel = 0;
+	barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
+	barrier.subresourceRange.baseArrayLayer = 0;
+	barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+
+	qvkCmdPipelineBarrier( command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &barrier );
+}
+
+
 static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice device, VkSurfaceKHR surface, VkSurfaceFormatKHR surface_format, VkSwapchainKHR *swapchain ) {
 	VkImageViewCreateInfo view;
 	VkSurfaceCapabilitiesKHR surface_caps;
 	VkExtent2D image_extent;
+	VkCommandBuffer command_buffer;
 	uint32_t present_mode_count, i;
 	VkPresentModeKHR present_mode;
 	VkPresentModeKHR *present_modes;
@@ -305,7 +378,19 @@ static void vk_create_swapchain( VkPhysicalDevice physical_device, VkDevice devi
 		view.subresourceRange.layerCount = 1;
 
 		VK_CHECK(qvkCreateImageView( vk.device, &view, NULL, &vk.swapchain_image_views[i] ) );
+
 	}
+
+	command_buffer = begin_command_buffer();
+
+	for ( i = 0; i < vk.swapchain_image_count; i++ ) {
+		record_image_layout_transition( command_buffer, vk.swapchain_images[i],
+			VK_IMAGE_ASPECT_COLOR_BIT,
+			0, VK_IMAGE_LAYOUT_UNDEFINED,
+			VK_ACCESS_MEMORY_READ_BIT, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR );
+	}
+
+	end_command_buffer( command_buffer );
 }
 
 
@@ -329,7 +414,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;		// needed for presentation
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+		attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 		attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	}
 	else
@@ -342,7 +427,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 		attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE;   // needed for next render pass
 		attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 		attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		attachments[0].initialLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		attachments[0].initialLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 		attachments[0].finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 	}
 
@@ -452,7 +537,7 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 	attachments[0].storeOp = VK_ATTACHMENT_STORE_OP_STORE; // needed for presentation
 	attachments[0].stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
 	attachments[0].stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-	attachments[0].initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachments[0].initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 	attachments[0].finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
 	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass_gamma ) );
@@ -534,28 +619,6 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 	}
 
 	VK_CHECK( qvkCreateRenderPass( device, &desc, NULL, &vk.render_pass_screenmap ) );
-}
-
-
-static void record_image_layout_transition(VkCommandBuffer command_buffer, VkImage image, VkImageAspectFlags image_aspect_flags, VkAccessFlags src_access_flags, VkImageLayout old_layout, VkAccessFlags dst_access_flags, VkImageLayout new_layout) {
-	VkImageMemoryBarrier barrier;
-
-	barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-	barrier.pNext = NULL;
-	barrier.srcAccessMask = src_access_flags;
-	barrier.dstAccessMask = dst_access_flags;
-	barrier.oldLayout = old_layout;
-	barrier.newLayout = new_layout;
-	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-	barrier.image = image;
-	barrier.subresourceRange.aspectMask = image_aspect_flags;
-	barrier.subresourceRange.baseMipLevel = 0;
-	barrier.subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
-	barrier.subresourceRange.baseArrayLayer = 0;
-	barrier.subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
-
-	qvkCmdPipelineBarrier(command_buffer, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1, &barrier);
 }
 
 
@@ -778,6 +841,9 @@ const char *vk_get_format_name( VkFormat format )
 	switch ( format ) {
 		// color formats
 		CASE_STR( VK_FORMAT_B8G8R8A8_SRGB );
+		CASE_STR( VK_FORMAT_R8G8B8A8_SRGB );
+		CASE_STR( VK_FORMAT_B8G8R8A8_SNORM );
+		CASE_STR( VK_FORMAT_R8G8B8A8_SNORM );
 		CASE_STR( VK_FORMAT_B8G8R8A8_UNORM );
 		CASE_STR( VK_FORMAT_R8G8B8A8_UNORM );
 		CASE_STR( VK_FORMAT_B4G4R4A4_UNORM_PACK16 );
@@ -796,22 +862,58 @@ const char *vk_get_format_name( VkFormat format )
 }
 
 
+// Check if we can use vkCmdBlitImage for the given source and destination image formats.
+static qboolean vk_blit_enabled( const VkFormat srcFormat, const VkFormat dstFormat )
+{
+	VkFormatProperties formatProps;
+	qboolean blit_enabled = qtrue;
+
+	qvkGetPhysicalDeviceFormatProperties( vk.physical_device, srcFormat, &formatProps );
+	if ( ( formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT ) == 0 )
+		blit_enabled = qfalse;
+
+	qvkGetPhysicalDeviceFormatProperties( vk.physical_device, dstFormat, &formatProps );
+	if ( ( formatProps.linearTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT ) == 0 )
+		blit_enabled = qfalse;
+
+	return blit_enabled;
+}
+
+
+static VkFormat get_hdr_format( VkFormat base_format )
+{
+	switch ( r_hdr->integer ) {
+		case -1: return VK_FORMAT_B4G4R4A4_UNORM_PACK16;
+		case 1: return VK_FORMAT_R16G16B16A16_UNORM;
+		default: return base_format;
+	}
+}
+
+
 static void get_surface_formats( void )
 {
 	vk.depth_format = get_depth_format( vk.physical_device );
-	
-	// primary buffer
-	switch ( r_hdr->integer ) {
-		case -1: vk.color_format = VK_FORMAT_B4G4R4A4_UNORM_PACK16; break;
-		case 1:	vk.color_format = VK_FORMAT_R16G16B16A16_UNORM; break;
-		default: vk.color_format = vk.surface_format.format; break;
-	}
+
+	vk.color_format = get_hdr_format( vk.surface_format.format );
 
 	vk.resolve_format = vk.color_format;
 
-	if ( vk.fboActive ) {
-		if ( vk.msaaActive ) {
+	vk.capture_format = VK_FORMAT_R8G8B8A8_UNORM;
+
+	if ( r_fbo->integer && r_ext_multisample->integer ) {
+		vk.resolve_format = vk.surface_format.format;
+	}
+
+	vk.blitEnabled = vk_blit_enabled( vk.resolve_format, vk.capture_format );
+	if ( !vk.blitEnabled ) {
+		// try to change capture format
+		vk.capture_format = VK_FORMAT_B8G8R8A8_UNORM;
+		vk.blitEnabled = vk_blit_enabled( vk.resolve_format, vk.capture_format );
+		if ( !vk.blitEnabled && r_hdr->integer ) {
+			// we can't perform HDR surface conversion so must disable HDR
+			vk.color_format = vk.surface_format.format;
 			vk.resolve_format = vk.surface_format.format;
+			vk.capture_format = vk.surface_format.format;
 		}
 	}
 }
@@ -1532,61 +1634,6 @@ void vk_init_buffers( void )
 }
 
 
-void vk_bind_fog_image( void )
-{
-	vk_update_descriptor( 3, tr.fogImage->descriptor );
-}
-
-static VkCommandBuffer begin_command_buffer( void )
-{
-	VkCommandBufferBeginInfo begin_info;
-	VkCommandBufferAllocateInfo alloc_info;
-	VkCommandBuffer command_buffer;
-
-	alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-	alloc_info.pNext = NULL;
-	alloc_info.commandPool = vk.command_pool;
-	alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-	alloc_info.commandBufferCount = 1;
-	VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &command_buffer ) );
-
-	begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	begin_info.pNext = NULL;
-	begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-	begin_info.pInheritanceInfo = NULL;
-
-	VK_CHECK( qvkBeginCommandBuffer( command_buffer, &begin_info ) );
-
-	return command_buffer;
-}
-
-
-void end_command_buffer( VkCommandBuffer command_buffer )
-{
-	VkSubmitInfo submit_info;
-	VkCommandBuffer cmdbuf[1];
-
-	cmdbuf[0] = command_buffer;
-
-	VK_CHECK( qvkEndCommandBuffer( command_buffer ) );
-
-	submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-	submit_info.pNext = NULL;
-	submit_info.waitSemaphoreCount = 0;
-	submit_info.pWaitSemaphores = NULL;
-	submit_info.pWaitDstStageMask = NULL;
-	submit_info.commandBufferCount = 1;
-	submit_info.pCommandBuffers = cmdbuf;
-	submit_info.signalSemaphoreCount = 0;
-	submit_info.pSignalSemaphores = NULL;
-
-	VK_CHECK( qvkQueueSubmit( vk.queue, 1, &submit_info, VK_NULL_HANDLE ) );
-	VK_CHECK( qvkQueueWaitIdle( vk.queue ) );
-
-	qvkFreeCommandBuffers( vk.device, vk.command_pool, 1, cmdbuf );
-}
-
-
 static void vk_release_geometry_buffers( void )
 {
 	int i;
@@ -1791,10 +1838,10 @@ qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size )
 
 static void vk_create_shader_modules( void )
 {
-	extern const unsigned char st_clip_vert_spv[];
-	extern const int st_clip_vert_spv_size;
-	extern const unsigned char st_clip_fog_vert_spv[];
-	extern const int st_clip_fog_vert_spv_size;
+	extern const unsigned char st_vert_spv[];
+	extern const int st_vert_spv_size;
+	extern const unsigned char st_fog_vert_spv[];
+	extern const int st_fog_vert_spv_size;
 
 	extern const unsigned char st_enviro_vert_spv[];
 	extern const int st_enviro_vert_spv_size;
@@ -1810,18 +1857,28 @@ static void vk_create_shader_modules( void )
 
 	extern const unsigned char color_frag_spv[];
 	extern const int color_frag_spv_size;
-	extern const unsigned char color_clip_vert_spv[];
-	extern const int color_clip_vert_spv_size;
+	extern const unsigned char color_vert_spv[];
+	extern const int color_vert_spv_size;
 
-	extern const unsigned char mt_clip_vert_spv[];
-	extern const int mt_clip_vert_spv_size;
-	extern const unsigned char mt_clip_fog_vert_spv[];
-	extern const int mt_clip_fog_vert_spv_size;
+	extern const unsigned char mt_vert_spv[];
+	extern const int mt_vert_spv_size;
+	extern const unsigned char mt_fog_vert_spv[];
+	extern const int mt_fog_vert_spv_size;
+
+	extern const unsigned char mt2_vert_spv[];
+	extern const int mt2_vert_spv_size;
+	extern const unsigned char mt2_fog_vert_spv[];
+	extern const int mt2_fog_vert_spv_size;
 
 	extern const unsigned char mt_frag_spv[];
 	extern const int mt_frag_spv_size;
 	extern const unsigned char mt_fog_frag_spv[];
 	extern const int mt_fog_frag_spv_size;
+
+	extern const unsigned char mt2_frag_spv[];
+	extern const int mt2_frag_spv_size;
+	extern const unsigned char mt2_fog_frag_spv[];
+	extern const int mt2_fog_frag_spv_size;
 
 	extern const unsigned char fog_vert_spv[];
 	extern const int fog_vert_spv_size;
@@ -1833,10 +1890,10 @@ static void vk_create_shader_modules( void )
 	extern const unsigned char dot_frag_spv[];
 	extern const int dot_frag_spv_size;
 
-	extern const unsigned char light_clip_vert_spv[];
-	extern const int light_clip_vert_spv_size;
-	extern const unsigned char light_clip_fog_vert_spv[];
-	extern const int light_clip_fog_vert_spv_size;
+	extern const unsigned char light_vert_spv[];
+	extern const int light_vert_spv_size;
+	extern const unsigned char light_fog_vert_spv[];
+	extern const int light_fog_vert_spv_size;
 
 	extern const unsigned char light_frag_spv[];
 	extern const int light_frag_spv_size;
@@ -1853,24 +1910,30 @@ static void vk_create_shader_modules( void )
 	extern const unsigned char gamma_vert_spv[];
 	extern const int gamma_vert_spv_size;
 
-	vk.modules.st_clip_vs[0] = create_shader_module(st_clip_vert_spv, st_clip_vert_spv_size);
-	vk.modules.st_clip_vs[1] = create_shader_module(st_clip_fog_vert_spv, st_clip_fog_vert_spv_size);
+	vk.modules.st_vs[0] = create_shader_module(st_vert_spv, st_vert_spv_size);
+	vk.modules.st_vs[1] = create_shader_module(st_fog_vert_spv, st_fog_vert_spv_size);
 
 	vk.modules.st_enviro_vs[0] = create_shader_module(st_enviro_vert_spv, st_enviro_vert_spv_size);
 	vk.modules.st_enviro_vs[1] = create_shader_module(st_enviro_fog_vert_spv, st_enviro_fog_vert_spv_size);
 
-	vk.modules.mt_clip_vs[0] = create_shader_module(mt_clip_vert_spv, mt_clip_vert_spv_size);
-	vk.modules.mt_clip_vs[1] = create_shader_module(mt_clip_fog_vert_spv, mt_clip_fog_vert_spv_size);
+	vk.modules.mt_vs[0] = create_shader_module(mt_vert_spv, mt_vert_spv_size);
+	vk.modules.mt_vs[1] = create_shader_module(mt_fog_vert_spv, mt_fog_vert_spv_size);
+
+	vk.modules.mt2_vs[0] = create_shader_module(mt2_vert_spv, mt2_vert_spv_size);
+	vk.modules.mt2_vs[1] = create_shader_module(mt2_fog_vert_spv, mt2_fog_vert_spv_size);
 
 	vk.modules.st_fs[0] = create_shader_module(st_frag_spv, st_frag_spv_size);
 	vk.modules.st_fs[1] = create_shader_module(st_fog_frag_spv, st_fog_frag_spv_size);
 	vk.modules.st_df_fs = create_shader_module(st_df_frag_spv, st_df_frag_spv_size);
 
 	vk.modules.color_fs = create_shader_module(color_frag_spv, color_frag_spv_size);
-	vk.modules.color_clip_vs = create_shader_module(color_clip_vert_spv, color_clip_vert_spv_size);
+	vk.modules.color_vs = create_shader_module(color_vert_spv, color_vert_spv_size);
 
 	vk.modules.mt_fs[0] = create_shader_module(mt_frag_spv, mt_frag_spv_size);
 	vk.modules.mt_fs[1] = create_shader_module(mt_fog_frag_spv, mt_fog_frag_spv_size);
+
+	vk.modules.mt2_fs[0] = create_shader_module(mt2_frag_spv, mt2_frag_spv_size);
+	vk.modules.mt2_fs[1] = create_shader_module(mt2_fog_frag_spv, mt2_fog_frag_spv_size);
 
 	vk.modules.fog_vs = create_shader_module(fog_vert_spv, fog_vert_spv_size);
 	vk.modules.fog_fs = create_shader_module(fog_frag_spv, fog_frag_spv_size);
@@ -1878,8 +1941,8 @@ static void vk_create_shader_modules( void )
 	vk.modules.dot_vs = create_shader_module(dot_vert_spv, dot_vert_spv_size);
 	vk.modules.dot_fs = create_shader_module(dot_frag_spv, dot_frag_spv_size);
 
-	vk.modules.light.vs_clip[0] = create_shader_module(light_clip_vert_spv, light_clip_vert_spv_size);
-	vk.modules.light.vs_clip[1] = create_shader_module(light_clip_fog_vert_spv, light_clip_fog_vert_spv_size);
+	vk.modules.light.vs_clip[0] = create_shader_module(light_vert_spv, light_vert_spv_size);
+	vk.modules.light.vs_clip[1] = create_shader_module(light_fog_vert_spv, light_fog_vert_spv_size);
 
 	vk.modules.light.fs[0] = create_shader_module(light_frag_spv, light_frag_spv_size);
 	vk.modules.light.fs[1] = create_shader_module(light_fog_frag_spv, light_fog_frag_spv_size);
@@ -2783,6 +2846,8 @@ void vk_initialize( void )
 	if ( glConfig.numTextureUnits > MAX_TEXTURE_UNITS )
 		glConfig.numTextureUnits = MAX_TEXTURE_UNITS;
 
+	vk.maxBoundDescriptorSets = props.limits.maxBoundDescriptorSets;
+
 	glConfig.textureEnvAddAvailable = qtrue;
 	glConfig.textureCompression = TC_NONE;
 
@@ -2847,11 +2912,6 @@ void vk_initialize( void )
 		"%s %s, 0x%04x", device_type, props.deviceName, props.deviceID );
 
 	//
-	// Swapchain.
-	//
-	vk_create_swapchain( vk.physical_device, vk.device, vk.surface, vk.surface_format, &vk.swapchain );
-
-	//
 	// Sync primitives.
 	//
 	{
@@ -2912,6 +2972,11 @@ void vk_initialize( void )
 
 		VK_CHECK( qvkAllocateCommandBuffers( vk.device, &alloc_info, &vk.tess[i].command_buffer ) );
 	}
+
+	//
+	// Swapchain.
+	//
+	vk_create_swapchain( vk.physical_device, vk.device, vk.surface, vk.surface_format, &vk.swapchain );
 
 	vk_clear_attachment_pool();
 
@@ -3098,7 +3163,7 @@ void vk_initialize( void )
 	// Pipeline layouts.
 	//
 	{
-		VkDescriptorSetLayout set_layouts[5];
+		VkDescriptorSetLayout set_layouts[6];
 		VkPipelineLayoutCreateInfo desc;
 		VkPushConstantRange push_range;
 
@@ -3108,16 +3173,17 @@ void vk_initialize( void )
 
 		// standard pipelines
 
-		set_layouts[0] = vk.set_layout_uniform; // fog/dlight parameters
-		set_layouts[1] = vk.set_layout_sampler; // diffuse
-		set_layouts[2] = vk.set_layout_sampler; // lightmap
-		set_layouts[3] = vk.set_layout_sampler; // fog 
-		set_layouts[4] = vk.set_layout_storage; // storage
+		set_layouts[0] = vk.set_layout_storage; // storage for testing flare visibility
+		set_layouts[1] = vk.set_layout_uniform; // fog/dlight parameters
+		set_layouts[2] = vk.set_layout_sampler; // diffuse
+		set_layouts[3] = vk.set_layout_sampler; // lightmap / fog-only
+		set_layouts[4] = vk.set_layout_sampler; // blend
+		set_layouts[5] = vk.set_layout_sampler; // collapsed fog texture
 
 		desc.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		desc.pNext = NULL;
 		desc.flags = 0;
-		desc.setLayoutCount = 5;
+		desc.setLayoutCount = (vk.maxBoundDescriptorSets >= 6) ? 6 : 4;
 		desc.pSetLayouts = set_layouts;
 		desc.pushConstantRangeCount = 1;
 		desc.pPushConstantRanges = &push_range;
@@ -3350,8 +3416,8 @@ void vk_shutdown( void )
 		qvkDestroyFence( vk.device, vk.tess[i].rendering_finished_fence, NULL );
 	}
 	
-	qvkDestroyShaderModule(vk.device, vk.modules.st_clip_vs[0], NULL);
-	qvkDestroyShaderModule(vk.device, vk.modules.st_clip_vs[1], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.st_vs[0], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.st_vs[1], NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.st_enviro_vs[0], NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.st_enviro_vs[1], NULL);
@@ -3362,13 +3428,19 @@ void vk_shutdown( void )
 	qvkDestroyShaderModule(vk.device, vk.modules.st_df_fs, NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.color_fs, NULL);
-	qvkDestroyShaderModule(vk.device, vk.modules.color_clip_vs, NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.color_vs, NULL);
 
-	qvkDestroyShaderModule(vk.device, vk.modules.mt_clip_vs[0], NULL);
-	qvkDestroyShaderModule(vk.device, vk.modules.mt_clip_vs[1], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.mt_vs[0], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.mt_vs[1], NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.mt_fs[0], NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.mt_fs[1], NULL);
+
+	qvkDestroyShaderModule(vk.device, vk.modules.mt2_vs[0], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.mt2_vs[1], NULL);
+
+	qvkDestroyShaderModule(vk.device, vk.modules.mt2_fs[0], NULL);
+	qvkDestroyShaderModule(vk.device, vk.modules.mt2_fs[1], NULL);
 
 	qvkDestroyShaderModule(vk.device, vk.modules.fog_vs, NULL);
 	qvkDestroyShaderModule(vk.device, vk.modules.fog_fs, NULL);
@@ -3845,8 +3917,8 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	VkShaderModule *vs_module = NULL;
 	VkShaderModule *fs_module = NULL;
 	int32_t vert_spec_data[1]; // clippping
-	floatint_t frag_spec_data[7]; // alpha-test-func, alpha-test-value, depth-fragment, alpha-to-coverage, color_mode, abs_light, multitexture mode
-	VkSpecializationMapEntry spec_entries[8];
+	floatint_t frag_spec_data[8]; // alpha-test-func, alpha-test-value, depth-fragment, alpha-to-coverage, color_mode, abs_light, multitexture mode, discard mode
+	VkSpecializationMapEntry spec_entries[9];
 	VkSpecializationInfo vert_spec_info;
 	VkSpecializationInfo frag_spec_info;
 	VkPipelineVertexInputStateCreateInfo vertex_input_state;
@@ -3868,12 +3940,12 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 
 	switch ( def->shader_type ) {
 		case TYPE_SIGNLE_TEXTURE:
-			vs_module = &vk.modules.st_clip_vs[0];
+			vs_module = &vk.modules.st_vs[0];
 			fs_module = &vk.modules.st_fs[0];
 			break;
 		case TYPE_SIGNLE_TEXTURE_DF:
 			state_bits |= GLS_DEPTHMASK_TRUE;
-			vs_module = &vk.modules.st_clip_vs[0];
+			vs_module = &vk.modules.st_vs[0];
 			fs_module = &vk.modules.st_df_fs;
 			break;
 		case TYPE_SIGNLE_TEXTURE_ENVIRO:
@@ -3890,14 +3962,20 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 			break;
 		case TYPE_MULTI_TEXTURE_MUL:
 		case TYPE_MULTI_TEXTURE_ADD:
-		case TYPE_MULTI_TEXTURE_ADD2:
-			vs_module = &vk.modules.mt_clip_vs[0];
+		case TYPE_MULTI_TEXTURE_ADD_IDENTITY:
+			vs_module = &vk.modules.mt_vs[0];
 			fs_module = &vk.modules.mt_fs[0];
+			break;
+		case TYPE_MULTI_TEXTURE_MUL2:
+		case TYPE_MULTI_TEXTURE_ADD2:
+		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY:
+			vs_module = &vk.modules.mt2_vs[0];
+			fs_module = &vk.modules.mt2_fs[0];
 			break;
 		case TYPE_COLOR_WHITE:
 		case TYPE_COLOR_GREEN:
 		case TYPE_COLOR_RED:
-			vs_module = &vk.modules.color_clip_vs;
+			vs_module = &vk.modules.color_vs;
 			fs_module = &vk.modules.color_fs;
 			break;
 		case TYPE_FOG_ONLY:
@@ -3986,10 +4064,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	// multutexture mode
 	switch ( def->shader_type ) {
 		case TYPE_MULTI_TEXTURE_MUL:
+		case TYPE_MULTI_TEXTURE_MUL2:
 			frag_spec_data[6].i = 0; break;
 		case TYPE_MULTI_TEXTURE_ADD:
-			frag_spec_data[6].i = 1; break;
 		case TYPE_MULTI_TEXTURE_ADD2:
+			frag_spec_data[6].i = 1; break;
+		case TYPE_MULTI_TEXTURE_ADD_IDENTITY:
+		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY:
 			frag_spec_data[6].i = 2; break;
 		default: 
 			break;
@@ -4041,9 +4122,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	spec_entries[7].offset = 6 * sizeof( int32_t );
 	spec_entries[7].size = sizeof( int32_t );
 
-	frag_spec_info.mapEntryCount = 7;
+	spec_entries[8].constantID = 7; // discard mode
+	spec_entries[8].offset = 7 * sizeof( int32_t );
+	spec_entries[8].size = sizeof( int32_t );
+
+	frag_spec_info.mapEntryCount = 8;
 	frag_spec_info.pMapEntries = spec_entries + 1;
-	frag_spec_info.dataSize = sizeof( int32_t ) * 7;
+	frag_spec_info.dataSize = sizeof( int32_t ) * 8;
 	frag_spec_info.pData = &frag_spec_data[0];
 	shader_stages[1].pSpecializationInfo = &frag_spec_info;
 
@@ -4069,19 +4154,19 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 		case TYPE_SIGNLE_TEXTURE_ENVIRO:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( color4ub_t ) );				// color array
-			push_bind( 4, sizeof( vec4_t ) );					// normals
+			push_bind( 5, sizeof( vec4_t ) );					// normals
 			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
 			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
-			push_attr( 4, 4, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
 				break;
 		case TYPE_SIGNLE_TEXTURE_LIGHTING:
 		case TYPE_SIGNLE_TEXTURE_LIGHTING1:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 2, sizeof( vec2_t ) );					// st0 array
-			push_bind( 4, sizeof( vec4_t ) );					// normals array
+			push_bind( 5, sizeof( vec4_t ) );					// normals array
 			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
 			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
-			push_attr( 4, 4, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 5, 5, VK_FORMAT_R32G32B32A32_SFLOAT );
 			break;
 		case TYPE_COLOR_WHITE:
 		case TYPE_COLOR_GREEN:
@@ -4089,7 +4174,9 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
 			break;
-		default: // multitexture variations
+		case TYPE_MULTI_TEXTURE_ADD:
+		case TYPE_MULTI_TEXTURE_ADD_IDENTITY:
+		case TYPE_MULTI_TEXTURE_MUL:
 			push_bind( 0, sizeof( vec4_t ) );					// xyz array
 			push_bind( 1, sizeof( color4ub_t ) );				// color array
 			push_bind( 2, sizeof( vec2_t ) );					// st0 array
@@ -4098,6 +4185,23 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
 			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
 			push_attr( 3, 3, VK_FORMAT_R32G32_SFLOAT );
+			break;
+		case TYPE_MULTI_TEXTURE_ADD2:
+		case TYPE_MULTI_TEXTURE_ADD2_IDENTITY:
+		case TYPE_MULTI_TEXTURE_MUL2:
+			push_bind( 0, sizeof( vec4_t ) );					// xyz array
+			push_bind( 1, sizeof( color4ub_t ) );				// color array
+			push_bind( 2, sizeof( vec2_t ) );					// st0 array
+			push_bind( 3, sizeof( vec2_t ) );					// st1 array
+			push_bind( 4, sizeof( vec2_t ) );					// st2 array
+			push_attr( 0, 0, VK_FORMAT_R32G32B32A32_SFLOAT );
+			push_attr( 1, 1, VK_FORMAT_R8G8B8A8_UNORM );
+			push_attr( 2, 2, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 3, 3, VK_FORMAT_R32G32_SFLOAT );
+			push_attr( 4, 4, VK_FORMAT_R32G32_SFLOAT );
+			break;
+		default:
+			ri.Error( ERR_DROP, "%s: invalid shader type - %i", __func__, def->shader_type );
 			break;
 	}
 	vertex_input_state.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -4169,13 +4273,18 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 	 // depth bias state
 	if ( def->polygon_offset ) {
 		rasterization_state.depthBiasEnable = VK_TRUE;
-		rasterization_state.depthBiasConstantFactor = r_offsetUnits->value;
 		rasterization_state.depthBiasClamp = 0.0f;
+#ifdef USE_REVERSED_DEPTH
+		rasterization_state.depthBiasConstantFactor = -r_offsetUnits->value;
+		rasterization_state.depthBiasSlopeFactor = -r_offsetFactor->value;
+#else
+		rasterization_state.depthBiasConstantFactor = r_offsetUnits->value;
 		rasterization_state.depthBiasSlopeFactor = r_offsetFactor->value;
+#endif
 	} else {
 		rasterization_state.depthBiasEnable = VK_FALSE;
-		rasterization_state.depthBiasConstantFactor = 0.0f;
 		rasterization_state.depthBiasClamp = 0.0f;
+		rasterization_state.depthBiasConstantFactor = 0.0f;
 		rasterization_state.depthBiasSlopeFactor = 0.0f;
 	}
 
@@ -4312,6 +4421,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 		attachment_blend_state.dstAlphaBlendFactor = attachment_blend_state.dstColorBlendFactor;
 		attachment_blend_state.colorBlendOp = VK_BLEND_OP_ADD;
 		attachment_blend_state.alphaBlendOp = VK_BLEND_OP_ADD;
+
+		// try to reduce pixel fillrate for transparent surfaces, this yields 1..10% fps increase when multisampling in enabled
+		if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_SRC_ALPHA && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ) {
+			frag_spec_data[7].i = 1;
+		} else if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_ONE && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE ) {
+			frag_spec_data[7].i = 2;
+		}
 	}
 
 	blend_state.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
@@ -4744,7 +4860,7 @@ void vk_update_mvp( const float *m ) {
 
 
 //static VkDeviceSize shade_offs[5];
-static VkBuffer shade_bufs[5];
+static VkBuffer shade_bufs[6];
 static int bind_base;
 static int bind_count;
 
@@ -4813,7 +4929,7 @@ void vk_bind_geometry_ext( int flags )
 
 #ifdef USE_VBO
 	if ( tess.vboIndex ) {
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = vk.vbo.vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = vk.vbo.vertex_buffer;
 
 		//if ( flags & TESS_IDX ) {  // index
 			//qvkCmdBindIndexBuffer( vk.cmd->command_buffer, vk.vbo.index_buffer, tess.shader->iboOffset, VK_INDEX_TYPE_UINT32 );
@@ -4839,9 +4955,14 @@ void vk_bind_geometry_ext( int flags )
 			vk_bind_index( 3 );
 		}
 
-		if ( flags & TESS_NNN ) {
-			vk.cmd->vbo_offset[4] = tess.shader->normalOffset;
+		if ( flags & TESS_ST2 ) {  // 3
+			vk.cmd->vbo_offset[4] = tess.shader->stages[ tess.vboStage ]->tex_offset[1];
 			vk_bind_index( 4 );
+		}
+
+		if ( flags & TESS_NNN ) {
+			vk.cmd->vbo_offset[5] = tess.shader->normalOffset;
+			vk_bind_index( 5 );
 		}
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->vbo_offset + bind_base );
@@ -4849,7 +4970,7 @@ void vk_bind_geometry_ext( int flags )
 	} else
 #endif // USE_VBO
 	{
-		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = vk.cmd->vertex_buffer;
+		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = vk.cmd->vertex_buffer;
 
 		if ( flags & TESS_IDX ) {
 			uint32_t offset = vk_tess_index( tess.numIndexes, tess.indexes );
@@ -4872,8 +4993,12 @@ void vk_bind_geometry_ext( int flags )
 			vk_bind_attr(3, sizeof(tess.svars.texcoords[1][0]), tess.svars.texcoordPtr[1]);
 		}
 
+		if ( flags & TESS_ST2 ) {
+			vk_bind_attr(4, sizeof(tess.svars.texcoords[2][0]), tess.svars.texcoordPtr[2]);
+		}
+
 		if ( flags & TESS_NNN ) {
-			vk_bind_attr(4, sizeof(tess.normal[0]), tess.normal);
+			vk_bind_attr(5, sizeof(tess.normal[0]), tess.normal);
 		}
 
 		qvkCmdBindVertexBuffers( vk.cmd->command_buffer, bind_base, bind_count, shade_bufs, vk.cmd->buf_offset + bind_base );
@@ -4906,7 +5031,7 @@ void vk_update_descriptor_offset( int index, uint32_t offset )
 void vk_bind_descriptor_sets( void )
 {
 	uint32_t offsets[2], offset_count;
-	int start, end, count;
+	uint32_t start, end, count;
 
 	start = vk.cmd->descriptor_set.start;
 	if ( start == ~0U )
@@ -4915,11 +5040,8 @@ void vk_bind_descriptor_sets( void )
 	end = vk.cmd->descriptor_set.end;
 
 	offset_count = 0;
-	if ( start == 0 ) { // uniform offset
-		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 0 ];
-	}
-	if ( end >= 4 ) { // storage offset
-		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ 1 ];
+	if ( start <= 1 ) { // uniform offset or storage offset
+		offsets[ offset_count++ ] = vk.cmd->descriptor_set.offset[ start ];
 	}
 
 	count = end - start + 1;
@@ -5143,6 +5265,7 @@ void vk_begin_frame( void )
 	// Ensure visibility of geometry buffers writes.
 	//record_buffer_memory_barrier( vk.cmd->command_buffer, vk.cmd->vertex_buffer, vk.cmd->vertex_buffer_offset, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, VK_ACCESS_HOST_WRITE_BIT, VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT );
 
+#if 0
 #ifdef USE_SINGLE_FBO
 	//frameBuffer = vk.framebuffers[ vk.swapchain_image_index ];
 	if ( vk.fboActive ) {
@@ -5159,6 +5282,7 @@ void vk_begin_frame( void )
 			VK_ACCESS_SHADER_READ_BIT, VK_IMAGE_LAYOUT_UNDEFINED, //VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
 			VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL );
 	}
+#endif
 #endif
 
 	if ( vk.cmd->vertex_buffer_offset > vk.stats.vertex_buffer_max ) {
@@ -5192,6 +5316,10 @@ void vk_begin_frame( void )
 	vk.cmd->descriptor_set.end = 0;
 
 	vk_update_descriptor( 2, tr.whiteImage->descriptor );
+	vk_update_descriptor( 3, tr.whiteImage->descriptor );
+	if ( vk.maxBoundDescriptorSets >= 6 ) {
+		vk_update_descriptor( 4, tr.whiteImage->descriptor );
+	}
 
 	// other stats
 	vk.stats.push_size = 0;
@@ -5328,9 +5456,22 @@ void vk_end_frame( void )
 }
 
 
+static qboolean is_bgr( VkFormat format ) {
+	switch ( format ) {
+		case VK_FORMAT_B8G8R8A8_UNORM:
+		case VK_FORMAT_B8G8R8A8_SNORM:
+		case VK_FORMAT_B8G8R8A8_UINT:
+		case VK_FORMAT_B8G8R8A8_SINT:
+		case VK_FORMAT_B8G8R8A8_SRGB:
+			return qtrue;
+		default:
+			return qfalse;
+	}
+}
+
+
 void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 {
-	VkFormatProperties formatProps;
 	VkCommandBuffer command_buffer;
 	VkDeviceMemory memory;
 	VkMemoryRequirements memory_requirements;
@@ -5340,17 +5481,16 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	VkImageCreateInfo desc;
 	VkImage srcImage;
 	VkImageLayout srcImageLayout;
+	VkAccessFlagBits srcImageAccess;
 	VkImage dstImage;
-	qboolean blit_enabled;
 	byte *buffer_ptr;
 	byte *data;
 	int i;
 
-	//vk_wait_idle();
 	VK_CHECK( qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e12 ) );
 
 	if ( vk.fboActive ) {
-		
+		srcImageAccess = VK_ACCESS_SHADER_READ_BIT;
 		srcImageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
 #ifdef USE_SINGLE_FBO
 		srcImage = vk.color_image;
@@ -5358,7 +5498,7 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 		srcImage = vk.cmd->color_image;
 #endif
 	} else {
-
+		srcImageAccess = VK_ACCESS_MEMORY_READ_BIT;
 		srcImageLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 		srcImage = vk.swapchain_images[ vk.swapchain_image_index ];
 	}
@@ -5370,7 +5510,7 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	desc.pNext = NULL;
 	desc.flags = 0;
 	desc.imageType = VK_IMAGE_TYPE_2D;
-	desc.format = VK_FORMAT_R8G8B8A8_UNORM;
+	desc.format = vk.capture_format;
 	desc.extent.width = width;
 	desc.extent.height = height;
 	desc.extent.depth = 1;
@@ -5398,25 +5538,21 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 
 	command_buffer = begin_command_buffer();
 
-	record_image_layout_transition( command_buffer, srcImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_MEMORY_READ_BIT, srcImageLayout, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
-	record_image_layout_transition( command_buffer, dstImage, VK_IMAGE_ASPECT_COLOR_BIT, 0, VK_IMAGE_LAYOUT_UNDEFINED, VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ); 
+	record_image_layout_transition( command_buffer, srcImage,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		srcImageAccess, srcImageLayout,
+		VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL );
 
-	//end_command_buffer( command_buffer );
+	record_image_layout_transition( command_buffer, dstImage,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		0, VK_IMAGE_LAYOUT_UNDEFINED,
+		VK_ACCESS_TRANSFER_WRITE_BIT, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL ); 
 
-	// Check if we can use vkCmdBlitImage for the given source and destination image formats.
-	blit_enabled = qtrue;
+	// end_command_buffer( command_buffer );
 
-	qvkGetPhysicalDeviceFormatProperties(vk.physical_device, vk.surface_format.format, &formatProps);
-	if ((formatProps.optimalTilingFeatures & VK_FORMAT_FEATURE_BLIT_SRC_BIT) == 0)
-		blit_enabled = qfalse;
+	// command_buffer = begin_command_buffer();
 
-	qvkGetPhysicalDeviceFormatProperties(vk.physical_device, VK_FORMAT_R8G8B8A8_UNORM, &formatProps);
-	if ((formatProps.linearTilingFeatures & VK_FORMAT_FEATURE_BLIT_DST_BIT) == 0)
-		blit_enabled = qfalse;
-
-	//command_buffer = begin_command_buffer();
-
-	if ( blit_enabled ) {
+	if ( vk.blitEnabled ) {
 		VkImageBlit region;
 
 		region.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
@@ -5473,17 +5609,13 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 		data += layout.rowPitch;
 	}
 
-	if (!blit_enabled) {
-		VkFormat fmt = vk.surface_format.format;
-		int swizzle_components = (fmt == VK_FORMAT_B8G8R8A8_SRGB || fmt == VK_FORMAT_B8G8R8A8_UNORM || fmt == VK_FORMAT_B8G8R8A8_SNORM);
-		if (swizzle_components) {
-			buffer_ptr = buffer;
-			for (i = 0; i < width * height; i++) {
-				byte tmp = buffer_ptr[0];
-				buffer_ptr[0] = buffer_ptr[2];
-				buffer_ptr[2] = tmp;
-				buffer_ptr += 4;
-			}
+	if ( is_bgr( vk.blitEnabled ? vk.capture_format : vk.resolve_format ) ) {
+		buffer_ptr = buffer;
+		for ( i = 0; i < width * height; i++ ) {
+			byte tmp = buffer_ptr[0];
+			buffer_ptr[0] = buffer_ptr[2];
+			buffer_ptr[2] = tmp;
+			buffer_ptr += 4;
 		}
 	}
 
@@ -5497,6 +5629,11 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 
 	// restore previous layout
 	command_buffer = begin_command_buffer();
-	record_image_layout_transition( command_buffer, srcImage, VK_IMAGE_ASPECT_COLOR_BIT, VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_MEMORY_READ_BIT, srcImageLayout );
+
+	record_image_layout_transition( command_buffer, srcImage,
+		VK_IMAGE_ASPECT_COLOR_BIT,
+		VK_ACCESS_TRANSFER_READ_BIT, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+		srcImageAccess, srcImageLayout );
+
 	end_command_buffer( command_buffer );
 }

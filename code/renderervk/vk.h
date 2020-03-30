@@ -39,7 +39,10 @@ typedef enum {
 	TYPE_SIGNLE_TEXTURE_LIGHTING1,
 	TYPE_MULTI_TEXTURE_MUL,
 	TYPE_MULTI_TEXTURE_ADD,
+	TYPE_MULTI_TEXTURE_ADD_IDENTITY,
+	TYPE_MULTI_TEXTURE_MUL2,
 	TYPE_MULTI_TEXTURE_ADD2,
+	TYPE_MULTI_TEXTURE_ADD2_IDENTITY,
 	TYPE_COLOR_WHITE,
 	TYPE_COLOR_GREEN,
 	TYPE_COLOR_RED,
@@ -122,9 +125,10 @@ typedef struct vkUniform_s {
 #define TESS_RGBA  (4)
 #define TESS_ST0   (8)
 #define TESS_ST1   (16)
-#define TESS_NNN   (32)
-#define TESS_VPOS  (64) // uniform with eyePos
-#define TESS_ENV   (128) // mark shader stage with environment mapping
+#define TESS_ST2   (32)
+#define TESS_NNN   (64)
+#define TESS_VPOS  (128) // uniform with eyePos
+#define TESS_ENV   (256) // mark shader stage with environment mapping
 
 //
 // Initialization.
@@ -181,7 +185,6 @@ void vk_draw_light( uint32_t pipeline, Vk_Depth_Range depth_range, uint32_t unif
 void vk_read_pixels( byte* buffer, uint32_t width, uint32_t height ); // screenshots
 
 qboolean vk_alloc_vbo( const byte *vbo_data, int vbo_size );
-void vk_bind_fog_image( void );
 void vk_update_mvp( const float *m );
 
 uint32_t vk_tess_index( uint32_t numIndexes, const void *src );
@@ -210,16 +213,16 @@ typedef struct vk_tess_s {
 
 	VkDescriptorSet uniform_descriptor;
 	uint32_t		uniform_read_offset;
-	VkDeviceSize	buf_offset[5];
-	VkDeviceSize	vbo_offset[5];
+	VkDeviceSize	buf_offset[6];
+	VkDeviceSize	vbo_offset[6];
 
 	VkBuffer		curr_index_buffer;
 	uint32_t		curr_index_offset;
 
 	struct {
 		uint32_t		start, end;
-		VkDescriptorSet	current[5];
-		uint32_t		offset[2]; // 0 and 4
+		VkDescriptorSet	current[6];
+		uint32_t		offset[2]; // 0 (uniform) and 5 (storage)
 	} descriptor_set;
 
 	Vk_Depth_Range depth_range;
@@ -374,16 +377,18 @@ typedef struct {
 	// Shader modules.
 	//
 	struct {
-		VkShaderModule st_clip_vs[2];
+		VkShaderModule st_vs[2];
 		VkShaderModule st_enviro_vs[2];
-		VkShaderModule mt_clip_vs[2];
+		VkShaderModule mt_vs[2];
+		VkShaderModule mt2_vs[2];
 
 		VkShaderModule st_fs[2];
 		VkShaderModule st_df_fs;
 		VkShaderModule mt_fs[2];
+		VkShaderModule mt2_fs[2];
 
 		VkShaderModule color_fs;
-		VkShaderModule color_clip_vs;
+		VkShaderModule color_vs;
 
 		VkShaderModule gamma_fs;
 		VkShaderModule gamma_vs;
@@ -472,10 +477,12 @@ typedef struct {
 	float maxLodBias;
 
 	VkFormat color_format;
+	VkFormat capture_format;
 	VkFormat resolve_format;
 	VkFormat depth_format;
 
 	qboolean fboActive;
+	qboolean blitEnabled;
 	qboolean msaaActive;
 
 	qboolean offscreenRender;
@@ -500,6 +507,8 @@ typedef struct {
 	uint32_t screenMapSamples;
 
 	uint32_t image_chunk_size;
+
+	uint32_t maxBoundDescriptorSets;
 
 } Vk_Instance;
 

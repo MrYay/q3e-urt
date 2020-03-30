@@ -314,7 +314,7 @@ void RB_TestFlare( flare_t *f ) {
 	if ( f->testCount ) {
 		uint32_t *cnt = (uint32_t*)(vk.storage.buffer_ptr + offset);
 		if ( *cnt )
-			visible = qtrue;	
+			visible = qtrue;
 		else
 			visible = qfalse;
 
@@ -339,9 +339,9 @@ void RB_TestFlare( flare_t *f ) {
 	tess.vboIndex = 0;
 #endif
 	// render test dot
-	vk_reset_descriptor( 4 );
-	vk_update_descriptor( 4, vk.storage.descriptor );
-	vk_update_descriptor_offset( 1, offset );
+	vk_reset_descriptor( 0 );
+	vk_update_descriptor( 0, vk.storage.descriptor );
+	vk_update_descriptor_offset( 0, offset );
 
 	vk_bind_geometry_ext( TESS_XYZ );
 	vk_draw_geometry( vk.dot_pipeline, DEPTH_RANGE_NORMAL, qfalse );
@@ -525,6 +525,10 @@ void RB_RenderFlares( void ) {
 	float		*m;
 
 	if ( !r_flares->integer ) {
+		return;
+	}
+
+	if ( vk.renderPassIndex != RENDER_PASS_MAIN ) {
 		return;
 	}
 

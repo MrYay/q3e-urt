@@ -5,7 +5,7 @@ layout(push_constant) uniform Transform {
 	mat4 mvp;
 };
 
-layout(set = 0, binding = 0) uniform UBO {
+layout(set = 1, binding = 0) uniform UBO {
 	// VERTEX
 	vec4 eyePos;
 	vec4 lightPos;
@@ -22,13 +22,13 @@ layout(set = 0, binding = 0) uniform UBO {
 
 layout(location = 0) in vec3 in_position;
 layout(location = 2) in vec2 in_tex_coord;
-layout(location = 4) in vec3 in_normal;
+layout(location = 5) in vec3 in_normal;
 
 layout(location = 0) out vec2 frag_tex_coord;
 layout(location = 1) out vec3 N; // normal array 
 layout(location = 2) out vec4 L; // object-space light vector
 layout(location = 3) out vec4 V; // object-space view vector
-//layout(location = 4) out vec2 fog_tex_coord;
+layout(location = 4) out vec2 fog_tex_coord;
 
 out gl_PerVertex {
 	vec4 gl_Position;
@@ -41,4 +41,25 @@ void main() {
 	N = in_normal;
 	L = lightPos - vec4(in_position, 1.0);
 	V = eyePos - vec4(in_position, 1.0);
+
+	// fog calculations...
+
+	float s = dot(in_position, fogDistanceVector.xyz) + fogDistanceVector.w;
+	float t = dot(in_position, fogDepthVector.xyz) + fogDepthVector.w;
+
+	if ( fogEyeT.y == 1.0 ) {
+		if ( t < 0.0 ) {
+			t = 1.0 / 32.0;
+		} else {
+			t = 31.0 / 32.0;
+		}
+	} else {
+		if ( t < 1.0 ) {
+			t = 1.0 / 32.0;
+		} else {
+			t = 1.0 / 32.0 + (30.0 / 32.0 * t) / ( t - fogEyeT.x );
+		}
+	}
+
+	fog_tex_coord = vec2(s, t);
 }
