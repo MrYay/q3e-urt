@@ -814,14 +814,14 @@ static void SVC_Info( const netadr_t *from ) {
 SV_FlushRedirect
 ================
 */
-static netadr_t redirectAddress; // for rcon return messages
+//static netadr_t redirectAddress; // for rcon return messages
 
 static void SV_FlushRedirect( const char *outputbuf )
 {
-	if ( *outputbuf )
-	{
-		NET_OutOfBandPrint( NS_SERVER, &redirectAddress, "print\n%s", outputbuf );
-	}
+	//if ( *outputbuf )
+	//{
+		NET_OutOfBandPrint( NS_SERVER, &svs.redirectAddress, "print\n%s", outputbuf );
+	//}
 }
 
 
@@ -868,7 +868,7 @@ static void SVC_RemoteCommand( const netadr_t *from ) {
 	}
 
 	// start redirecting all print outputs to the packet
-	redirectAddress = *from;
+	svs.redirectAddress = *from;
 	Com_BeginRedirect( sv_outputbuf, sizeof( sv_outputbuf ), SV_FlushRedirect );
 
 	if ( !sv_rconPassword->string[0] && !rconPassword2[0] ) {
