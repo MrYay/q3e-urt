@@ -407,7 +407,42 @@ static void SCR_DrawSpeedo( void )
 
 	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
+/*
+// Draws viewangle relative to movedir
+static void SCR_DrawAngle( void )
+{
+	float angle, yaw, dot, length;
+	vec3_t v1, v2;
+	char string[64];
+/*
+	if( !cl_drawrelativeangle->integer ) {
+		return;
+	}
+*//*
+	angle = 0;
 
+	VectorCopy(cl.snap.ps.velocity, v1);
+	v1[2] = 0.0f;
+	length = VectorLength(v1);
+
+	if( length ) {
+		yaw = cl.snap.ps.viewangles[YAW];
+		yaw *= M_PI/180.f;
+
+		v2[0] = cos(yaw);
+		v2[1] = sin(yaw);
+		v2[2] = 0.0f;
+
+		VectorNormalize(v1);
+		dot = DotProduct(v1, v2);
+		angle = acosf(dot) * 180.0f/M_PI;
+	}
+
+	sprintf(string, "Angle: %d \n", (int) angle);
+
+	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+}
+*/
 #ifdef USE_VOIP
 /*
 =================
@@ -597,6 +632,7 @@ void SCR_DrawScreenField( stereoFrame_t stereoFrame ) {
 			CL_CGameRendering( stereoFrame );
 			SCR_DrawDemoRecording();
 			SCR_DrawSpeedo();
+			SCR_DrawAngle();
 #ifdef USE_VOIP
 			SCR_DrawVoipMeter();
 #endif
