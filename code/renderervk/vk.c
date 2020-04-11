@@ -466,8 +466,6 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 
 	if ( vk.msaaActive )
 	{
-		attachments[0].format = vk.resolve_format;
-
 		attachments[2].flags = 0;
 		attachments[2].format = vk.color_format;
 		attachments[2].samples = vkSamples;
@@ -594,8 +592,6 @@ static void create_render_pass( VkDevice device, VkFormat depth_format )
 	desc.pDependencies = deps;
 
 	if ( vk.screenMapSamples > VK_SAMPLE_COUNT_1_BIT ) {
-
-		attachments[0].format = vk.resolve_format;
 
 		attachments[2].flags = 0;
 		attachments[2].format = vk.color_format;
@@ -896,25 +892,13 @@ static void get_surface_formats( void )
 
 	vk.color_format = get_hdr_format( vk.surface_format.format );
 
-	vk.resolve_format = vk.color_format;
-
 	vk.capture_format = VK_FORMAT_R8G8B8A8_UNORM;
 
-	if ( r_fbo->integer && r_ext_multisample->integer ) {
-		vk.resolve_format = vk.surface_format.format;
-	}
+	vk.blitEnabled = vk_blit_enabled( vk.color_format, vk.capture_format );
 
-	vk.blitEnabled = vk_blit_enabled( vk.resolve_format, vk.capture_format );
-	if ( !vk.blitEnabled ) {
-		// try to change capture format
-		vk.capture_format = VK_FORMAT_B8G8R8A8_UNORM;
-		vk.blitEnabled = vk_blit_enabled( vk.resolve_format, vk.capture_format );
-		if ( !vk.blitEnabled && r_hdr->integer ) {
-			// we can't perform HDR surface conversion so must disable HDR
-			vk.color_format = vk.surface_format.format;
-			vk.resolve_format = vk.surface_format.format;
-			vk.capture_format = vk.surface_format.format;
-		}
+	if ( !vk.blitEnabled )
+	{
+		vk.capture_format = vk.color_format;
 	}
 }
 
@@ -3002,7 +2986,7 @@ void vk_initialize( void )
 		// post-processing/msaa-resolve
 		VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 
-		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.resolve_format,
+		create_color_attachment( glConfig.vidWidth, glConfig.vidHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
 			usage, &vk.color_image, &vk.color_image_view, &vk.color_image_memory, qfalse );
 
 		// screenmap
@@ -3013,7 +2997,7 @@ void vk_initialize( void )
 				usage, &vk.color_image3_msaa, &vk.color_image_view3_msaa, &vk.color_image_memory3_msaa, qtrue );
 		}
 
-		create_color_attachment( vk.screenMapWidth, vk.screenMapHeight, VK_SAMPLE_COUNT_1_BIT, vk.resolve_format,
+		create_color_attachment( vk.screenMapWidth, vk.screenMapHeight, VK_SAMPLE_COUNT_1_BIT, vk.color_format,
 			usage, &vk.color_image3, &vk.color_image_view3, &vk.color_image_memory3, qfalse );
 
 		// screenmap
@@ -4422,11 +4406,13 @@ VkPipeline create_pipeline( const Vk_Pipeline_Def *def, uint32_t renderPassIndex
 		attachment_blend_state.colorBlendOp = VK_BLEND_OP_ADD;
 		attachment_blend_state.alphaBlendOp = VK_BLEND_OP_ADD;
 
-		// try to reduce pixel fillrate for transparent surfaces, this yields 1..10% fps increase when multisampling in enabled
-		if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_SRC_ALPHA && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ) {
-			frag_spec_data[7].i = 1;
-		} else if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_ONE && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE ) {
-			frag_spec_data[7].i = 2;
+		if ( def->allow_discard ) {
+			// try to reduce pixel fillrate for transparent surfaces, this yields 1..10% fps increase when multisampling in enabled
+			if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_SRC_ALPHA && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ) {
+				frag_spec_data[7].i = 1;
+			} else if ( attachment_blend_state.srcColorBlendFactor == VK_BLEND_FACTOR_ONE && attachment_blend_state.dstColorBlendFactor == VK_BLEND_FACTOR_ONE ) {
+				frag_spec_data[7].i = 2;
+			}
 		}
 	}
 
@@ -4924,11 +4910,12 @@ void vk_bind_geometry_ext( int flags )
 	bind_base = -1;
 	bind_count = 0;
 
-	if ( !flags )
-		return;
-
 #ifdef USE_VBO
 	if ( tess.vboIndex ) {
+		
+		if ( ( flags & (TESS_XYZ | TESS_RGBA | TESS_ST0 | TESS_ST1 | TESS_ST2 | TESS_NNN ) ) == 0 )
+			return;
+
 		shade_bufs[0] = shade_bufs[1] = shade_bufs[2] = shade_bufs[3] = shade_bufs[4] = shade_bufs[5] = vk.vbo.vertex_buffer;
 
 		//if ( flags & TESS_IDX ) {  // index
@@ -4956,7 +4943,7 @@ void vk_bind_geometry_ext( int flags )
 		}
 
 		if ( flags & TESS_ST2 ) {  // 3
-			vk.cmd->vbo_offset[4] = tess.shader->stages[ tess.vboStage ]->tex_offset[1];
+			vk.cmd->vbo_offset[4] = tess.shader->stages[ tess.vboStage ]->tex_offset[2];
 			vk_bind_index( 4 );
 		}
 
@@ -4976,6 +4963,9 @@ void vk_bind_geometry_ext( int flags )
 			uint32_t offset = vk_tess_index( tess.numIndexes, tess.indexes );
 			vk_bind_index_buffer( vk.cmd->vertex_buffer, offset );
 		}
+
+		if ( ( flags & ( TESS_XYZ | TESS_RGBA | TESS_ST0 | TESS_ST1 | TESS_ST2 | TESS_NNN ) ) == 0 )
+			return;
 
 		if ( flags & TESS_XYZ ) {
 			vk_bind_attr(0, sizeof(tess.xyz[0]), &tess.xyz[0]);
@@ -5463,6 +5453,7 @@ static qboolean is_bgr( VkFormat format ) {
 		case VK_FORMAT_B8G8R8A8_UINT:
 		case VK_FORMAT_B8G8R8A8_SINT:
 		case VK_FORMAT_B8G8R8A8_SRGB:
+		case VK_FORMAT_B4G4R4A4_UNORM_PACK16:
 			return qtrue;
 		default:
 			return qfalse;
@@ -5485,7 +5476,8 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 	VkImage dstImage;
 	byte *buffer_ptr;
 	byte *data;
-	int i;
+	uint32_t pixel_width;
+	uint32_t i, n;
 
 	VK_CHECK( qvkWaitForFences( vk.device, 1, &vk.cmd->rendering_finished_fence, VK_FALSE, 1e12 ) );
 
@@ -5599,29 +5591,56 @@ void vk_read_pixels( byte *buffer, uint32_t width, uint32_t height )
 
 	qvkGetImageSubresourceLayout( vk.device, dstImage, &subresource, &layout );
 
-	VK_CHECK(qvkMapMemory(vk.device, memory, 0, VK_WHOLE_SIZE, 0, (void**)&data));
+	VK_CHECK( qvkMapMemory( vk.device, memory, 0, VK_WHOLE_SIZE, 0, (void**)&data ) );
 	data += layout.offset;
 
-	buffer_ptr = buffer + width * (height - 1) * 4;
-	for (i = 0; i < height; i++) {
-		Com_Memcpy(buffer_ptr, data, width * 4);
-		buffer_ptr -= width * 4;
+	switch ( vk.capture_format ) {
+		case VK_FORMAT_B4G4R4A4_UNORM_PACK16: pixel_width = 2; break;
+		case VK_FORMAT_R16G16B16A16_UNORM: pixel_width = 8; break;
+		default: pixel_width = 4; break;
+	}
+
+	buffer_ptr = buffer + width * (height - 1) * 3;
+	for ( i = 0; i < height; i++ ) {
+		switch ( pixel_width ) {
+			case 2: {
+				uint16_t *src = (uint16_t*)data;
+				for ( n = 0; n < width; n++ ) {
+					buffer_ptr[n*3+0] = ((src[n]>>12)&0xF)<<4;
+					buffer_ptr[n*3+1] = ((src[n]>>8)&0xF)<<4;
+					buffer_ptr[n*3+2] = ((src[n]>>4)&0xF)<<4;
+				}
+			} break;
+
+			case 4: {
+				for ( n = 0; n < width; n++ ) {
+					buffer_ptr[n*3+0] = data[n*4+0];
+					buffer_ptr[n*3+1] = data[n*4+1];
+					buffer_ptr[n*3+2] = data[n*4+2];
+				}
+			} break;
+
+			case 8: {
+				const uint16_t *src = (uint16_t*)data;
+				for ( n = 0; n < width; n++ ) {
+					buffer_ptr[n*3+0] = src[n*4+0]>>8;
+					buffer_ptr[n*3+1] = src[n*4+1]>>8;
+					buffer_ptr[n*3+2] = src[n*4+2]>>8;
+				}
+			} break;
+		}
+		buffer_ptr -= width * 3;
 		data += layout.rowPitch;
 	}
 
-	if ( is_bgr( vk.blitEnabled ? vk.capture_format : vk.resolve_format ) ) {
+	if ( is_bgr( vk.capture_format ) ) {
 		buffer_ptr = buffer;
 		for ( i = 0; i < width * height; i++ ) {
 			byte tmp = buffer_ptr[0];
 			buffer_ptr[0] = buffer_ptr[2];
 			buffer_ptr[2] = tmp;
-			buffer_ptr += 4;
+			buffer_ptr += 3;
 		}
-	}
-
-	// strip alpha component
-	for ( i = 0; i < width * height; i++ ) {
-		Com_Memcpy( buffer + i*3, buffer + i*4, 3 );
 	}
 
 	qvkDestroyImage( vk.device, dstImage, NULL );

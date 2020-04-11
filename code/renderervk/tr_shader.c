@@ -25,6 +25,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 static char *s_shaderText;
 
+static const char *s_extensionOffset;
+static int s_extendedShader;
+
 // the shader is parsed into these global variables, then copied into
 // dynamically allocated memory if it is valid.
 static	shaderStage_t	stages[MAX_SHADER_STAGES];
@@ -244,6 +247,7 @@ static int NameToDstBlendMode( const char *name )
 	ri.Printf( PRINT_WARNING, "WARNING: unknown blend mode '%s' in shader '%s', substituting GL_ONE\n", name, shader.name );
 	return GLS_DSTBLEND_ONE;
 }
+
 
 /*
 ===============
@@ -642,7 +646,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		//
 		// clampmap <name>
 		//
-		else if ( !Q_stricmp( token, "clampmap" ) || !Q_stricmp( token, "screenMap" ) )
+		else if ( !Q_stricmp( token, "clampmap" ) || ( !Q_stricmp( token, "screenMap" ) && s_extendedShader ) )
 		{
 			imgFlags_t flags;
 
@@ -686,6 +690,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 		else if ( !Q_stricmp( token, "animMap" ) )
 		{
 			int	totalImages = 0;
+			int maxAnimations = s_extendedShader ? MAX_IMAGE_ANIMATIONS : MAX_IMAGE_ANIMATIONS_VQ3;
 
 			token = COM_ParseExt( text, qfalse );
 			if ( !token[0] )
@@ -697,14 +702,14 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 
 			// parse up to MAX_IMAGE_ANIMATIONS animations
 			while ( 1 ) {
-				int		num;
+				int num;
 
 				token = COM_ParseExt( text, qfalse );
 				if ( !token[0] ) {
 					break;
 				}
 				num = stage->bundle[0].numImageAnimations;
-				if ( num < MAX_IMAGE_ANIMATIONS ) {
+				if ( num < maxAnimations ) {
 					imgFlags_t flags = IMGFLAG_NONE;
 
 					if (!shader.noMipMaps)
@@ -727,9 +732,9 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 				totalImages++;
 			}
 
-			if ( totalImages > MAX_IMAGE_ANIMATIONS ) {
+			if ( totalImages > maxAnimations ) {
 				ri.Printf( PRINT_WARNING, "WARNING: ignoring excess images for 'animMap' (found %d, max is %d) in shader '%s'\n",
-						totalImages, MAX_IMAGE_ANIMATIONS, shader.name );
+					totalImages, maxAnimations, shader.name );
 			}
 		}
 		else if ( !Q_stricmp( token, "videoMap" ) )
@@ -1051,7 +1056,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 
 			continue;
 		}
-		else if ( !Q_stricmp( token, "depthFragment" ) )
+		else if ( !Q_stricmp( token, "depthFragment" ) && s_extendedShader )
 		{
 			stage->depthFragment = qtrue;
 		}
@@ -1109,6 +1114,7 @@ static qboolean ParseStage( shaderStage_t *stage, const char **text )
 
 	return qtrue;
 }
+
 
 /*
 ===============
@@ -1634,6 +1640,8 @@ static qboolean ParseShader( const char **text )
 
 	s = 0;
 
+	s_extendedShader = (*text >= s_extensionOffset);
+
 	token = COM_ParseExt( text, qtrue );
 	if ( token[0] != '{' )
 	{
@@ -1748,7 +1756,7 @@ static qboolean ParseShader( const char **text )
 			shader.noPicMip = 1;
 			continue;
 		}
-		else if ( !Q_stricmp( token, "novlcollapse" ) )
+		else if ( !Q_stricmp( token, "novlcollapse" ) && s_extendedShader )
 		{
 			shader.noVLcollapse = 1;
 			continue;
@@ -1840,7 +1848,7 @@ static qboolean ParseShader( const char **text )
 			continue;
 		}
 		// conditional stage definition
-		else if ( !Q_stricmp( token, "if" ) || !Q_stricmp( token, "else" ) || !Q_stricmp( token, "elif" ) )
+		else if ( ( !Q_stricmp( token, "if" ) || !Q_stricmp( token, "else" ) || !Q_stricmp( token, "elif" ) ) && s_extendedShader )
 		{
 			if ( Q_stricmp( token, "if" ) == 0 ) {
 				branch = brIF;
@@ -2325,7 +2333,6 @@ static qboolean EqualRGBgen( const shaderStage_t *st1, const shaderStage_t *st2 
 }
 
 
-/*
 static qboolean EqualTCgen( int bundle, const shaderStage_t *st1, const shaderStage_t *st2 )
 {
 	const textureBundle_t *b1, *b2;
@@ -2410,7 +2417,6 @@ static qboolean EqualTCgen( int bundle, const shaderStage_t *st1, const shaderSt
 
 	return qtrue;
 }
-*/
 
 
 /*
@@ -2681,12 +2687,12 @@ from the current global working shader
 =========================
 */
 static shader_t *FinishShader( void ) {
-	int			stage, i;
+	int			stage, i, n;
 	qboolean	hasLightmapStage;
 	qboolean	vertexLightmap;
 	qboolean	colorBlend;
 	qboolean	depthMask;
-	//shaderStage_t *lastMT;
+	shaderStage_t *lastTCgen[NUM_TEXTURE_BUNDLES];
 
 	hasLightmapStage = qfalse;
 	vertexLightmap = qfalse;
@@ -2925,6 +2931,9 @@ static shader_t *FinishShader( void ) {
 		def.face_culling = shader.cullType;
 		def.polygon_offset = shader.polygonOffset;
 
+		if ( stage == 1 )
+			def.allow_discard = 1;
+
 		for ( i = 0; i < stage; i++ ) {
 			shaderStage_t *pStage = &stages[i];
 			def.state_bits = pStage->stateBits;
@@ -3015,24 +3024,21 @@ static shader_t *FinishShader( void ) {
 
 #if 1
 	// try to avoid redundant per-stage computations
-	// lastMT = NULL;
+	Com_Memset( lastTCgen, 0, sizeof( lastTCgen ) );
 	for ( i = 0; i < shader.numUnfoggedPasses - 1; i++ ) {
 		if ( !stages[ i+1 ].active )
 			break;
 		if ( EqualRGBgen( &stages[ i ], &stages[ i+1 ] ) && EqualACgen( &stages[ i ], &stages[ i+1 ] ) ) {
 			stages[ i+1 ].tessFlags &= ~TESS_RGBA;
 		}
-		//if ( EqualTCgen( 0, &stages[ i ], &stages[ i+1 ] ) ) {
-		//	stages[ i+1 ].tessFlags &= ~TESS_ST0;
-		//}
-		//if ( stages[ i ].mtEnv ) {
-		//	lastMT = &stages[ i ];
-		//}
-		//if ( stages[ i+1 ].mtEnv ) {
-		//	if ( EqualTCgen( 1, lastMT, &stages[ i+1 ] ) ) {
-		//		stages[ i+1 ].tessFlags &= ~TESS_ST1;
-		//	}
-		//}
+		for ( n = 0; n < NUM_TEXTURE_BUNDLES; n++ ) {
+			if ( EqualTCgen( n, lastTCgen[ n ], &stages[ i+1 ] ) ) {
+				stages[ i+1 ].tessFlags &= ~(TESS_ST0 << n);
+			}
+			if ( stages[ i ].bundle[ n ].image != NULL ) {
+				lastTCgen[ n ] = &stages[ i ];
+			}
+		}
 	}
 #endif
 
@@ -3687,7 +3693,7 @@ static void ScanAndLoadShaderFiles( void )
 
 	// build single large buffer
 	s_shaderText = ri.Hunk_Alloc( sum + numShaderxFiles*2 + numShaderFiles*2 + 1, h_low );
-	s_shaderText[ 0 ] = '\0';
+	s_shaderText[ 0 ] = s_shaderText[ sum + numShaderxFiles*2 + numShaderFiles*2 ] = '\0';
 
 	textEnd = s_shaderText;
 
@@ -3700,6 +3706,11 @@ static void ScanAndLoadShaderFiles( void )
 			ri.FS_FreeFile( buffers[ i ] );
 		}
 	}
+
+	// if shader text >= s_extensionOffset then it is an extended shader
+	// normal shaders will never encounter that
+	s_extensionOffset = textEnd;
+
 	// extended shaders
 	for ( i = numShaderxFiles - 1; i >= 0 ; i-- ) {
 		if ( xbuffers[ i ] ) {

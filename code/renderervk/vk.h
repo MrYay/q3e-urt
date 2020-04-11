@@ -97,6 +97,7 @@ typedef struct {
 	int fog_stage; // off, fog-in / fog-out
 	int line_width;
 	int abs_light;
+	int allow_discard;
 } Vk_Pipeline_Def;
 
 typedef struct VK_Pipeline {
@@ -478,7 +479,6 @@ typedef struct {
 
 	VkFormat color_format;
 	VkFormat capture_format;
-	VkFormat resolve_format;
 	VkFormat depth_format;
 
 	qboolean fboActive;
