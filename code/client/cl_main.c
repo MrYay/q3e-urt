@@ -3391,6 +3391,9 @@ void CL_Frame( int msec ) {
 
 	// update audio
 	S_Update();
+#ifdef USE_DISCORD
+	CL_RunDiscord();
+#endif
 
 	// advance local effects for next frame
 	SCR_RunCinematic();
@@ -4198,6 +4201,10 @@ void CL_Init( void ) {
 #endif
 	Cmd_AddCommand( "modelist", CL_ModeList_f );
 
+#ifdef USE_DISCORD
+	Cmd_AddCommand("update_discord", CL_UpdatePresence);
+#endif
+
 	CL_InitRef();
 
 	SCR_Init();
@@ -4210,6 +4217,10 @@ void CL_Init( void ) {
 	Cvar_Get( "cl_guid", "", CVAR_USERINFO | CVAR_ROM | CVAR_PROTECTED );
 	CL_UpdateGUID( NULL, 0 );
 
+#ifdef USE_DISCORD
+	CL_InitDiscord();
+	CL_UpdatePresence();
+#endif
 	Com_Printf( "----- Client Initialization Complete -----\n" );
 }
 

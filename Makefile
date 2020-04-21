@@ -23,6 +23,7 @@ BUILD_SERVER     = 1
 
 USE_SDL          = 1
 USE_CURL         = 1
+USE_DISCORD      = 0
 USE_LOCAL_HEADERS= 0
 USE_VULKAN       = 0
 #USE_VULKAN_API   = 0
@@ -132,6 +133,10 @@ ifndef USE_CURL
 USE_CURL=1
 endif
 
+ifndef USE_DISCORD
+USE_DISCORD=1
+endif
+
 ifndef USE_CURL_DLOPEN
   ifdef MINGW
     USE_CURL_DLOPEN=0
@@ -161,6 +166,7 @@ R1DIR=$(MOUNT_DIR)/renderer
 RVDIR=$(MOUNT_DIR)/renderervk
 RVSDIR=$(MOUNT_DIR)/renderervk/shaders/spirv
 SDLDIR=$(MOUNT_DIR)/sdl
+EXTLIBSDIR=$(MOUNT_DIR)/extlibs
 
 CMDIR=$(MOUNT_DIR)/qcommon
 UDIR=$(MOUNT_DIR)/unix
@@ -225,6 +231,10 @@ else
 endif
 endif
 
+ifeq ($(USE_DISCORD),1)
+  BASE_CFLAGS += -DUSE_DISCORD
+endif
+
 ifeq ($(USE_VULKAN_API),1)
   BASE_CFLAGS += -DUSE_VULKAN_API
 endif
@@ -252,6 +262,7 @@ ifeq ($(PLATFORM),linux)
   else
     LIB=lib
   endif
+
 
   BASE_CFLAGS += -Wall -fno-strict-aliasing -Wimplicit -Wstrict-prototypes -pipe
 
@@ -388,7 +399,7 @@ ifdef MINGW
     ifeq ($(ARCH),x86)
       CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/windows/mingw/lib32
       CLIENT_LDFLAGS += -lSDL2
-	  CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/windows/mingw/lib32/SDL2.dll
+      CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libsdl/windows/mingw/lib32/SDL2.dll
     else
       CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libsdl/windows/mingw/lib64
       CLIENT_LDFLAGS += -lSDL264
@@ -409,6 +420,21 @@ ifdef MINGW
     endif
     CLIENT_LDFLAGS += -lcurl -lwldap32 -lcrypt32
   endif
+
+###### fixme
+  ifeq ($(USE_DISCORD),1)
+    BASE_CFLAGS += -I$(MOUNT_DIR)/libdiscord/include
+    ifeq ($(ARCH),x86_64)
+      CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libdiscord/windows/mingw/lib64
+      CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libdiscord/windows/mingw/lib64/discord-rpc.dll
+    else ifeq ($(ARCH),x86)
+      CLIENT_LDFLAGS += -L$(MOUNT_DIR)/libdiscord/windows/mingw/lib32
+      CLIENT_EXTRA_FILES += $(MOUNT_DIR)/libdiscord/windows/mingw/lib32/discord-rpc.dll
+    endif
+    CLIENT_LDFLAGS += -ldiscord-rpc
+  endif
+
+
 
 else # ifeq mingw32
 
@@ -861,6 +887,7 @@ Q3OBJ = \
   $(B)/client/cl_input.o \
   $(B)/client/cl_keys.o \
   $(B)/client/cl_main.o \
+  $(B)/client/cl_discord.o \
   $(B)/client/cl_net_chan.o \
   $(B)/client/cl_parse.o \
   $(B)/client/cl_scrn.o \
