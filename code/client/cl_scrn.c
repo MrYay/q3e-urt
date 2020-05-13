@@ -443,7 +443,7 @@ static void SCR_DrawAngle( void )
 
 	sprintf(string, "Angle: %d \n", (int) angle);
 
-	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
+	SCR_DrawStringExt( cl_drawangleX->integer, cl_drawangleY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
 
 #ifdef USE_VOIP
