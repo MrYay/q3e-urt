@@ -38,6 +38,9 @@ cvar_t 		*cl_drawspeedo;
 cvar_t 		*cl_speedoX;
 cvar_t		*cl_speedoY;
 cvar_t 		*cl_speedoSize;
+cvar_t		*cl_drawangle;
+cvar_t		*cl_drawangleX;
+cvar_t		*cl_drawangleY;
 
 /*
 ================
@@ -407,18 +410,18 @@ static void SCR_DrawSpeedo( void )
 
 	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
-/*
+
 // Draws viewangle relative to movedir
 static void SCR_DrawAngle( void )
 {
 	float angle, yaw, dot, length;
 	vec3_t v1, v2;
 	char string[64];
-/*
-	if( !cl_drawrelativeangle->integer ) {
+
+	if( !cl_drawangle->integer ) {
 		return;
 	}
-*//*
+
 	angle = 0;
 
 	VectorCopy(cl.snap.ps.velocity, v1);
@@ -442,7 +445,7 @@ static void SCR_DrawAngle( void )
 
 	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
-*/
+
 #ifdef USE_VOIP
 /*
 =================
@@ -561,6 +564,9 @@ void SCR_Init( void ) {
 	cl_speedoX = Cvar_Get("cl_speedoX", "250", CVAR_ARCHIVE_ND);
 	cl_speedoY = Cvar_Get("cl_speedoY", "240", CVAR_ARCHIVE_ND);
 	cl_speedoSize = Cvar_Get("cl_speedoSize", "6", CVAR_ARCHIVE_ND);
+	cl_drawangle = Cvar_Get("cl_drawangle", "0", CVAR_ARCHIVE_ND);
+	cl_drawangleX = Cvar_Get("cl_drawangleX", "250", CVAR_ARCHIVE_ND);
+	cl_drawangleX = Cvar_Get("cl_drawangleY", "210", CVAR_ARCHIVE_ND);
 
 	scr_initialized = qtrue;
 }
