@@ -414,7 +414,8 @@ static void SCR_DrawSpeedo( void )
 // Draws viewangle relative to movedir
 static void SCR_DrawAngle( void )
 {
-	float angle, yaw, dot, length;
+	float yaw, dot, length;
+	int angle;
 	vec3_t v1, v2;
 	char string[64];
 
@@ -438,10 +439,10 @@ static void SCR_DrawAngle( void )
 
 		VectorNormalize(v1);
 		dot = DotProduct(v1, v2);
-		angle = acosf(dot) * 180.0f/M_PI;
+		angle = (int) acosf(dot) * 180.0f/M_PI;
 	}
 
-	sprintf(string, "Angle: %d \n", (int) angle);
+	sprintf(string, "Angle: %d\n", angle);
 
 	SCR_DrawStringExt( cl_drawangleX->integer, cl_drawangleY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
