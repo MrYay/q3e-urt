@@ -439,10 +439,10 @@ static void SCR_DrawAngle( void )
 
 		VectorNormalize(v1);
 		dot = DotProduct(v1, v2);
-		angle = (int) acosf(dot) * 180.0f/M_PI;
+		angle = (int) (acosf(dot) * 180.0f/M_PI);
 	}
 
-	sprintf(string, "Angle: %d\n", angle);
+	sprintf(string, "Angle: %d \n", angle);
 
 	SCR_DrawStringExt( cl_drawangleX->integer, cl_drawangleY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
@@ -567,7 +567,7 @@ void SCR_Init( void ) {
 	cl_speedoSize = Cvar_Get("cl_speedoSize", "6", CVAR_ARCHIVE_ND);
 	cl_drawangle = Cvar_Get("cl_drawangle", "0", CVAR_ARCHIVE_ND);
 	cl_drawangleX = Cvar_Get("cl_drawangleX", "250", CVAR_ARCHIVE_ND);
-	cl_drawangleX = Cvar_Get("cl_drawangleY", "210", CVAR_ARCHIVE_ND);
+	cl_drawangleY = Cvar_Get("cl_drawangleY", "210", CVAR_ARCHIVE_ND);
 
 	scr_initialized = qtrue;
 }
