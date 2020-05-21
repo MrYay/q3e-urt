@@ -70,6 +70,8 @@ cvar_t	*cl_guidServerUniq;
 cvar_t	*cl_dlURL;
 cvar_t	*cl_dlDirectory;
 
+cvar_t* cl_demomode;
+
 // common cvars for GLimp modules
 cvar_t	*vid_xpos;			// X coordinate of window position
 cvar_t	*vid_ypos;			// Y coordinate of window position
@@ -694,50 +696,46 @@ static void CL_DemoCompleted( void ) {
 }
 
 
-/*
-=================
-CL_ReadDemoMessage
-=================
-*/
-void CL_ReadDemoMessage( void ) {
+static void CL_Readvq3DemoMessage( void ) 
+{
 	int			r;
 	msg_t		buf;
-	byte		bufData[ MAX_MSGLEN_BUF ];
+	byte		bufData[MAX_MSGLEN_BUF];
 	int			s;
 
-	if ( clc.demofile == FS_INVALID_HANDLE ) {
+	if (clc.demofile == FS_INVALID_HANDLE) {
 		CL_DemoCompleted();
 		return;
 	}
 
 	// get the sequence number
-	r = FS_Read( &s, 4, clc.demofile );
-	if ( r != 4 ) {
+	r = FS_Read(&s, 4, clc.demofile);
+	if (r != 4) {
 		CL_DemoCompleted();
 		return;
 	}
-	clc.serverMessageSequence = LittleLong( s );
+	clc.serverMessageSequence = LittleLong(s);
 
 	// init the message
-	MSG_Init( &buf, bufData, MAX_MSGLEN );
+	MSG_Init(&buf, bufData, MAX_MSGLEN);
 
 	// get the length
-	r = FS_Read( &buf.cursize, 4, clc.demofile );
-	if ( r != 4 ) {
+	r = FS_Read(&buf.cursize, 4, clc.demofile);
+	if (r != 4) {
 		CL_DemoCompleted();
 		return;
 	}
-	buf.cursize = LittleLong( buf.cursize );
-	if ( buf.cursize == -1 ) {
+	buf.cursize = LittleLong(buf.cursize);
+	if (buf.cursize == -1) {
 		CL_DemoCompleted();
 		return;
 	}
-	if ( buf.cursize > buf.maxsize ) {
-		Com_Error (ERR_DROP, "CL_ReadDemoMessage: demoMsglen > MAX_MSGLEN");
+	if (buf.cursize > buf.maxsize) {
+		Com_Error(ERR_DROP, "CL_ReadDemoMessage: demoMsglen > MAX_MSGLEN");
 	}
-	r = FS_Read( buf.data, buf.cursize, clc.demofile );
-	if ( r != buf.cursize ) {
-		Com_Printf( "Demo file was truncated.\n");
+	r = FS_Read(buf.data, buf.cursize, clc.demofile);
+	if (r != buf.cursize) {
+		Com_Printf("Demo file was truncated.\n");
 		CL_DemoCompleted();
 		return;
 	}
@@ -747,16 +745,103 @@ void CL_ReadDemoMessage( void ) {
 
 	clc.demoCommandSequence = clc.serverCommandSequence;
 
-	CL_ParseServerMessage( &buf );
+	CL_ParseServerMessage(&buf);
 
-	if ( clc.demorecording ) {
+	if (clc.demorecording) {
 		// track changes and write new message	
-		if ( clc.eventMask & EM_GAMESTATE ) {
-			CL_WriteGamestate( qfalse );
+		if (clc.eventMask & EM_GAMESTATE) {
+			CL_WriteGamestate(qfalse);
 			// nothing should came after gamestate in current message
-		} else if ( clc.eventMask & (EM_SNAPSHOT|EM_COMMAND) ) {
+		}
+		else if (clc.eventMask & (EM_SNAPSHOT | EM_COMMAND)) {
 			CL_WriteSnapshot();
 		}
+	}
+}
+
+static void CL_ReadUrtDemoMessage( void )
+{
+	int			r;
+	msg_t		buf;
+	byte		bufData[MAX_MSGLEN];
+	int			s;
+
+	// skip the end length (read it a second time) ... Is usefull only in backward read /* holblin */
+	int length_backward;
+
+	if (!clc.demofile) {
+		CL_DemoCompleted();
+		return;
+	}
+
+	// get the sequence number
+	r = FS_Read(&s, 4, clc.demofile);
+	if (r != 4) {
+		CL_DemoCompleted();
+		return;
+	}
+	clc.serverMessageSequence = LittleLong(s);
+
+	// init the message
+	MSG_Init(&buf, bufData, sizeof(bufData));
+
+	// get the length
+	r = FS_Read(&buf.cursize, 4, clc.demofile);
+	if (r != 4) {
+		CL_DemoCompleted();
+		return;
+	}
+	buf.cursize = LittleLong(buf.cursize);
+	if (buf.cursize == -1) {
+		CL_DemoCompleted();
+		return;
+	}
+
+	if (buf.cursize == 0) { // backward read gain the header demo /* holblin */
+		CL_DemoCompleted();
+		return;
+	}
+
+	if (buf.cursize > buf.maxsize) {
+		Com_Error(ERR_DROP, "CL_ReadDemoMessage: demoMsglen > MAX_MSGLEN");
+	}
+	r = FS_Read(buf.data, buf.cursize, clc.demofile);
+	if (r != buf.cursize) {
+		Com_Printf("Demo file was truncated.\n");
+		CL_DemoCompleted();
+		return;
+	}
+
+	// skip the end length (read it a second time) ... Is usefull only in backward read /* holblin */
+	r = FS_Read(&length_backward, 4, clc.demofile);
+	if (r != 4) {
+		CL_DemoCompleted();
+		return;
+	}
+	// now, check demo file format !!! /* holblin */
+	length_backward = LittleLong(length_backward);
+	if (length_backward != buf.cursize) {
+		CL_DemoCompleted();
+		return;
+	}
+
+	clc.lastPacketTime = cls.realtime;
+	buf.readcount = 0;
+	CL_ParseServerMessage(&buf);
+}
+
+/*
+=================
+CL_ReadDemoMessage
+=================
+*/
+void CL_ReadDemoMessage( void )
+{
+	if ( cl_demomode->integer ) {
+		CL_ReadUrtDemoMessage();
+	}
+	else {
+		CL_Readvq3DemoMessage();
 	}
 }
 
@@ -827,7 +912,237 @@ static void CL_CompleteDemoName( char *args, int argNum )
 	}
 }
 
+static void CL_PlayUrtDemo( void )
+{
+	char		name[MAX_OSPATH];
+	char		arg[MAX_OSPATH];
+	char* ext_test;
+	int			r, len, v1, v2;
+	char* s2;
 
+
+	if (Cmd_Argc() != 2) {
+		Com_Printf("demo <demoname>\n");
+		return;
+	}
+
+	// make sure a local server is killed
+	// 2 means don't force disconnect of local client
+	Cvar_Set("sv_killserver", "2");
+
+	// open the demo file
+	Q_strncpyz(arg, Cmd_Argv(1), sizeof(arg));
+
+	CL_Disconnect(qtrue);
+
+	// check for an extension .DEMOEXT_?? (?? is protocol)
+	ext_test = strrchr(arg, '.');
+	
+	// check for .urtdemo extension
+	if (ext_test && !Q_stricmp(ext_test, ".urtdemo")) {
+		Com_sprintf(name, sizeof(name), "demos/%s", arg);
+	}
+	else {
+		Com_sprintf(name, sizeof(name), "demos/%s.urtdemo", arg);
+	}
+	FS_FOpenFileRead(name, &clc.demofile, qtrue);
+
+	if (!clc.demofile) {
+		Com_Error(ERR_DROP, "couldn't open %s", name);
+		return;
+	}
+	Q_strncpyz(clc.demoName, arg, sizeof(clc.demoName));
+
+	Con_Close();
+
+	/* HOLBLIN TODO entete demo */
+	//@Barbatos: get the mod version from the server
+	//serverInfo = cl.gameState.stringData + cl.gameState.stringOffsets[ CS_SERVERINFO ];
+	//s1 = Info_ValueForKey(serverInfo, "g_modversion");
+
+	r = FS_Read(&len, 4, clc.demofile);
+	if (r != 4) {
+		CL_DemoCompleted();
+		return;
+	}
+
+	len = LittleLong(len);
+
+	s2 = malloc(len + 1);
+	r = FS_Read(s2, len, clc.demofile);
+	if (r != len) {
+		CL_DemoCompleted();
+		free(s2);
+		return;
+	}
+	s2[len] = '\0';
+
+	v1 = LittleLong(70);
+	r = FS_Read(&v2, 4, clc.demofile);
+	if (r != 4) {
+		CL_DemoCompleted();
+		free(s2);
+		return;
+	}
+
+	//@Barbatos: FIXME
+	/*if ( strcmp(s1, s2) ){
+		Com_Printf("Game version %s not supported for demos\n", s2);
+		free(s2);
+		CL_DemoCompleted ();
+		return;
+	}
+	*/
+	free(s2);
+
+	if (v1 != v2) {
+		Com_Printf("Protocol %d not supported for demos\n", v2);
+		CL_DemoCompleted();
+		return;
+	}
+
+	r = FS_Read(&len, 4, clc.demofile);
+	len = LittleLong(len);
+	if (r != 4 || len != 0) {
+		CL_DemoCompleted();
+		return;
+	}
+
+	r = FS_Read(&len, 4, clc.demofile);
+	len = LittleLong(len);
+	if (r != 4 || len != 0) {
+		CL_DemoCompleted();
+		return;
+	}
+	/* END HOLBLIN entete demo */
+
+	cls.state = CA_CONNECTED;
+	clc.demoplaying = qtrue;
+	Q_strncpyz(cls.servername, arg, sizeof(cls.servername));
+
+	clc.compat = qtrue;
+
+	// read demo messages until connected
+#ifdef USE_CURL
+	while (cls.state >= CA_CONNECTED && cls.state < CA_PRIMED && !Com_DL_InProgress(&download)) {
+#else
+	while (cls.state >= CA_CONNECTED && cls.state < CA_PRIMED) {
+#endif
+		CL_ReadDemoMessage();
+	}
+	// don't get the first snapshot this frame, to prevent the long
+	// time from the gamestate load from messing causing a time skip
+	clc.firstDemoFrameSkipped = qfalse;
+}
+
+static void CL_Playvq3Demo( void )
+{
+	char		name[MAX_OSPATH];
+	char* arg, * ext_test;
+	int			protocol, i;
+	char		retry[MAX_OSPATH];
+	const char* shortname, * slash;
+	fileHandle_t hFile;
+
+	if (Cmd_Argc() != 2) {
+		Com_Printf("demo <demoname>\n");
+		return;
+	}
+
+	// open the demo file
+	arg = Cmd_Argv(1);
+
+	// check for an extension .dm_?? (?? is protocol)
+	// check for an extension .DEMOEXT_?? (?? is protocol)
+	ext_test = strrchr(arg, '.');
+	if (ext_test && !Q_stricmpn(ext_test + 1, DEMOEXT, ARRAY_LEN(DEMOEXT) - 1))
+	{
+		protocol = atoi(ext_test + ARRAY_LEN(DEMOEXT));
+
+		for (i = 0; demo_protocols[i]; i++)
+		{
+			if (demo_protocols[i] == protocol)
+				break;
+		}
+
+		if (demo_protocols[i] /* || protocol == com_protocol->integer  || protocol == com_legacyprotocol->integer */)
+		{
+			Com_sprintf(name, sizeof(name), "demos/%s", arg);
+			FS_BypassPure();
+			FS_FOpenFileRead(name, &hFile, qtrue);
+			FS_RestorePure();
+		}
+		else
+		{
+			size_t len;
+
+			Com_Printf("Protocol %d not supported for demos\n", protocol);
+			len = ext_test - arg;
+
+			if (len >= ARRAY_LEN(retry))
+				len = ARRAY_LEN(retry) - 1;
+
+			Q_strncpyz(retry, arg, len + 1);
+			retry[len] = '\0';
+			protocol = CL_WalkDemoExt(retry, name, &hFile);
+		}
+	}
+	else
+		protocol = CL_WalkDemoExt(arg, name, &hFile);
+
+	if (hFile == FS_INVALID_HANDLE) {
+		Com_Printf(S_COLOR_YELLOW "couldn't open %s\n", name);
+		return;
+	}
+
+	FS_FCloseFile(hFile);
+	hFile = FS_INVALID_HANDLE;
+
+	// make sure a local server is killed
+	// 2 means don't force disconnect of local client
+	Cvar_Set("sv_killserver", "2");
+
+	CL_Disconnect(qtrue);
+
+	// clc.demofile will be closed during CL_Disconnect so reopen it
+	if (FS_FOpenFileRead(name, &clc.demofile, qtrue) == -1)
+	{
+		// drop this time
+		Com_Error(ERR_DROP, "couldn't open %s\n", name);
+		return;
+	}
+
+	if ((slash = strrchr(name, '/')) != NULL)
+		shortname = slash + 1;
+	else
+		shortname = name;
+
+	Q_strncpyz(clc.demoName, shortname, sizeof(clc.demoName));
+
+	Con_Close();
+
+	cls.state = CA_CONNECTED;
+	clc.demoplaying = qtrue;
+	Q_strncpyz(cls.servername, shortname, sizeof(cls.servername));
+
+	if (protocol < NEW_PROTOCOL_VERSION)
+		clc.compat = qtrue;
+	else
+		clc.compat = qfalse;
+
+	// read demo messages until connected
+#ifdef USE_CURL
+	while (cls.state >= CA_CONNECTED && cls.state < CA_PRIMED && !Com_DL_InProgress(&download)) {
+#else
+	while (cls.state >= CA_CONNECTED && cls.state < CA_PRIMED) {
+#endif
+		CL_ReadDemoMessage();
+	}
+
+	// don't get the first snapshot this frame, to prevent the long
+	// time from the gamestate load from messing causing a time skip
+	clc.firstDemoFrameSkipped = qfalse;
+}
 /*
 ====================
 CL_PlayDemo_f
@@ -836,112 +1151,26 @@ demo <demoname>
 
 ====================
 */
-static void CL_PlayDemo_f( void ) {
-	char		name[MAX_OSPATH];
-	char		*arg, *ext_test;
-	int			protocol, i;
-	char		retry[MAX_OSPATH];
-	const char	*shortname, *slash;
-	fileHandle_t hFile;
+static void CL_PlayDemo_f( void )
+{
+	char *arg, *ext;
 
-	if ( Cmd_Argc() != 2 ) {
-		Com_Printf( "demo <demoname>\n" );
+	if (Cmd_Argc() != 2) {
+		Com_Printf("demo <demoname>\n");
 		return;
 	}
 
-	// open the demo file
-	arg = Cmd_Argv( 1 );
+	arg = Cmd_Argv(1);
+	ext = strrchr(arg, '.');
 
-	// check for an extension .dm_?? (?? is protocol)
-	// check for an extension .DEMOEXT_?? (?? is protocol)
-	ext_test = strrchr(arg, '.');
-	if ( ext_test && !Q_stricmpn(ext_test + 1, DEMOEXT, ARRAY_LEN(DEMOEXT) - 1) )
-	{
-		protocol = atoi(ext_test + ARRAY_LEN(DEMOEXT));
-
-		for( i = 0; demo_protocols[ i ]; i++ )
-		{
-			if ( demo_protocols[ i ] == protocol )
-				break;
-		}
-
-		if ( demo_protocols[ i ] /* || protocol == com_protocol->integer  || protocol == com_legacyprotocol->integer */ )
-		{
-			Com_sprintf(name, sizeof(name), "demos/%s", arg);
-			FS_BypassPure();
-			FS_FOpenFileRead( name, &hFile, qtrue );
-			FS_RestorePure();
-		}
-		else
-		{
-			size_t len;
-
-			Com_Printf("Protocol %d not supported for demos\n", protocol );
-			len = ext_test - arg;
-
-			if(len >= ARRAY_LEN(retry))
-				len = ARRAY_LEN(retry) - 1;
-
-			Q_strncpyz( retry, arg, len + 1);
-			retry[len] = '\0';
-			protocol = CL_WalkDemoExt( retry, name, &hFile );
-		}
-	}
-	else
-		protocol = CL_WalkDemoExt( arg, name, &hFile );
-	
-	if ( hFile == FS_INVALID_HANDLE ) {
-		Com_Printf( S_COLOR_YELLOW "couldn't open %s\n", name );
+	if ( !ext || !Q_stricmp(ext, ".urtdemo") ) {
+		Cvar_Set("cl_demomode", "1");
+		CL_PlayUrtDemo();
 		return;
 	}
 
-	FS_FCloseFile( hFile ); 
-	hFile = FS_INVALID_HANDLE;
-
-	// make sure a local server is killed
-	// 2 means don't force disconnect of local client
-	Cvar_Set( "sv_killserver", "2" );
-
-	CL_Disconnect( qtrue );
-
-	// clc.demofile will be closed during CL_Disconnect so reopen it
-	if ( FS_FOpenFileRead( name, &clc.demofile, qtrue ) == -1 ) 
-	{
-		// drop this time
-		Com_Error( ERR_DROP, "couldn't open %s\n", name );
-		return;
-	}
-
-	if ( (slash = strrchr( name, '/' )) != NULL )
-		shortname = slash + 1;
-	else
-		shortname = name;
-
-	Q_strncpyz( clc.demoName, shortname, sizeof( clc.demoName ) );
-
-	Con_Close();
-
-	cls.state = CA_CONNECTED;
-	clc.demoplaying = qtrue;
-	Q_strncpyz( cls.servername, shortname, sizeof( cls.servername ) );
-
-	if ( protocol < NEW_PROTOCOL_VERSION )
-		clc.compat = qtrue;
-	else
-		clc.compat = qfalse;
-
-	// read demo messages until connected
-#ifdef USE_CURL
-	while ( cls.state >= CA_CONNECTED && cls.state < CA_PRIMED && !Com_DL_InProgress( &download ) ) {
-#else
-	while ( cls.state >= CA_CONNECTED && cls.state < CA_PRIMED ) {
-#endif
-		CL_ReadDemoMessage();
-	}
-
-	// don't get the first snapshot this frame, to prevent the long
-	// time from the gamestate load from messing causing a time skip
-	clc.firstDemoFrameSkipped = qfalse;
+	Cvar_Set("cl_demomode", "0");
+	CL_Playvq3Demo();
 }
 
 
@@ -3887,6 +4116,8 @@ void CL_Init( void ) {
 
 	cl_dlURL = Cvar_Get( "cl_dlURL", "http://c0ffee.moe/q3ut4/%1.pk3", CVAR_ARCHIVE_ND );
 	
+	cl_demomode = Cvar_Get("cl_demomode", "0", CVAR_ROM);
+
 	cl_dlDirectory = Cvar_Get( "cl_dlDirectory", "0", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( cl_dlDirectory, "0", "1", CV_INTEGER );
 	s = va( "Save downloads initiated by \\dlmap and \\download commands in:\n"
