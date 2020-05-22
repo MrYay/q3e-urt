@@ -406,7 +406,7 @@ static void SCR_DrawSpeedo( void )
 
 	speed = (int) sqrt(pow(cl.snap.ps.velocity[PITCH], 2) + pow(cl.snap.ps.velocity[YAW], 2));
 
-	sprintf( string, "Speed: %d up/s", speed );
+	sprintf( string, "Speed: %d ups", speed );
 
 	SCR_DrawStringExt( cl_speedoX->integer, cl_speedoY->integer, cl_speedoSize->integer, string, g_color_table[ ColorIndex( COLOR_WHITE ) ], qtrue, qfalse );
 }
