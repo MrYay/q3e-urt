@@ -9,12 +9,12 @@ It is based on last non-SDL source dump of ioquake3 with latest upstream fixes a
 * optimized Vulkan renderer
 * significally reworked QVM (Quake Virtual Machine)
 * improved server-side DoS protection, much reduced memory usage
-* raized filesystem limits (up to 20.000 maps can be handled in a single directory)
+* raised filesystem limits (up to 20,000 maps can be handled in a single directory)
 * reworked Zone memory allocator, no more out-of-memory errors
 * non-intrusive support for SDL2 backend (video,audio,input), selectable at compile time
 * tons of bugfixes and other improvements
 
-*This repository do not contains any game content so in order to play you must copy resulting binaries into your existing Quake III Arena installation*
+*This repository does not contain any game content so in order to play you must copy the resulting binaries into your existing installation*
 
 ## Build Instructions
 
@@ -56,7 +56,7 @@ Several make options available for linux/mingw builds:
 
 `BUILD_SERVER=1` - build dedicated server executable, enabled by default
 
-`USE_SDL=0`- use SDL2 backend for video, audio, input subsystems, disabled by default
+`USE_SDL=1`- use SDL2 backend for video, audio, input subsystems, recommended for a smooth Linux experience
 
 `USE_VULKAN=0` - link client with vulkan renderer instead of OpenGL, disabled by default
 
