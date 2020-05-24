@@ -65,6 +65,8 @@ cvar_t	*cl_serverStatusResendTime;
 
 cvar_t	*cl_lanForcePackets;
 
+cvar_t  *cl_lastServerAddress;
+
 cvar_t	*cl_guidServerUniq;
 
 cvar_t	*cl_dlURL;
@@ -1746,8 +1748,10 @@ CL_Reconnect_f
 ================
 */
 static void CL_Reconnect_f( void ) {
-	if ( cl_reconnectArgs[0] == '\0' )
+	if (!strlen(cl_lastServerAddress->string) || !strcmp(cl_lastServerAddress->string, "localhost")) {
+		Com_Printf( "Can't reconnect to localhost.\n" );
 		return;
+	}
 	Cvar_Set( "ui_singlePlayerActive", "0" );
 	Cbuf_AddText( va( "connect %s\n", cl_reconnectArgs ) );
 }
@@ -1878,6 +1882,8 @@ static void CL_Connect_f( void ) {
 		//clc.challenge = ((rand() << 16) ^ rand()) ^ Com_Milliseconds();
 		Com_RandomBytes( (byte*)&clc.challenge, sizeof( clc.challenge ) );
 	}
+
+	Cvar_Set("cl_lastServerAddress", serverString);
 
 	Key_SetCatcher( 0 );
 	clc.connectTime = -99999;	// CL_CheckForResend() will fire immediately
@@ -4081,6 +4087,8 @@ void CL_Init( void ) {
 
 	rconAddress = Cvar_Get ("rconAddress", "", 0);
 
+	cl_lastServerAddress = Cvar_Get("cl_lastServerAddress", "", CVAR_ARCHIVE_ND);
+	
 	cl_allowDownload = Cvar_Get( "cl_allowDownload", "0", CVAR_ARCHIVE_ND );
 #ifdef USE_CURL
 	cl_mapAutoDownload = Cvar_Get( "cl_mapAutoDownload", "1", CVAR_ARCHIVE_ND );
