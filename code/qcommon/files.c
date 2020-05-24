@@ -4685,6 +4685,7 @@ static void FS_Startup( void ) {
 
 	// add search path elements in reverse priority order
 	if ( fs_steampath->string[0] ) {
+		FS_AddGameDirectory(va("%s/q3ut4", fs_basepath->string), "download");
 		FS_AddGameDirectory( fs_steampath->string, fs_basegame->string );
 	}
 
@@ -4695,6 +4696,7 @@ static void FS_Startup( void ) {
 	// fs_homepath is somewhat particular to *nix systems, only add if relevant
 	// NOTE: same filtering below for mods and basegame
 	if ( fs_homepath->string[0] && Q_stricmp( fs_homepath->string, fs_basepath->string ) ) {
+		FS_AddGameDirectory(va("%s/q3ut4", fs_basepath->string), "download");
 		FS_AddGameDirectory( fs_homepath->string, fs_basegame->string );
 	}
 

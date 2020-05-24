@@ -2370,6 +2370,7 @@ void CL_NextDownload( void )
 
 		*s++ = '\0';
 		localName = s;
+		Com_sprintf(localName, MAX_STRING_CHARS, "q3ut4/download/%s", COM_SkipPath(CopyString(localName)));
 		if ( (s = strchr(s, '@')) != NULL )
 			*s++ = '\0';
 		else
@@ -4088,7 +4089,7 @@ void CL_Init( void ) {
 	rconAddress = Cvar_Get ("rconAddress", "", 0);
 
 	cl_lastServerAddress = Cvar_Get("cl_lastServerAddress", "", CVAR_ARCHIVE_ND);
-	
+
 	cl_allowDownload = Cvar_Get( "cl_allowDownload", "0", CVAR_ARCHIVE_ND );
 #ifdef USE_CURL
 	cl_mapAutoDownload = Cvar_Get( "cl_mapAutoDownload", "1", CVAR_ARCHIVE_ND );
