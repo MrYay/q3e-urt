@@ -35,6 +35,10 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "cl_curl.h"
 #endif /* USE_CURL */
 
+#ifdef USE_DISCORD
+#include "discord_rpc.h"
+#endif
+
 // file full of random crap that gets used to create cl_guid
 #define QKEY_FILE "qkey"
 #define QKEY_SIZE 2048
@@ -250,7 +254,6 @@ typedef struct {
 	int		demoCommandSequence;
 	int		demoDeltaNum;
 	int		demoMessageSequence;
-
 } clientConnection_t;
 
 extern	clientConnection_t clc;
@@ -626,4 +629,11 @@ void	VKimp_Init( glconfig_t *config );
 void	VKimp_Shutdown( qboolean unloadDLL );
 void	*VK_GetInstanceProcAddr( VkInstance instance, const char *name );
 qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
+#endif
+
+// discord
+#ifdef USE_DISCORD
+void    CL_UpdatePresence( void );
+void    CL_InitDiscord( void );
+void    CL_RunDiscord( void );
 #endif
