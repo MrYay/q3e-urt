@@ -62,6 +62,7 @@ Several make options available for linux/mingw builds:
 
 `USE_RENDERER_DLOPEN=0` - do not link single renderer into client binary, compile all renderers as dynamic libraries and allow to switch them on the fly via `\cl_renderer` cvar, disabled by default - *not recommented due to not stable renderer API*
 
+`USE_AUTH=1` - build client with auth system, enabled by default
 Example:
 
 `make BUILD_SERVER=0 USE_VULKAN=1` - which means do not build dedicated binary, build client with static vulkan renderer
