@@ -1516,7 +1516,10 @@ qboolean CL_Disconnect( qboolean showMainMenu ) {
 		cl_restarted = CL_RestoreOldGame();
 
 	cl_disconnecting = qfalse;
-
+#ifdef USE_DISCORD
+	Com_Printf("[DISCORD]: update on Disconnect\n");
+	CL_UpdatePresence();
+#endif
 	return cl_restarted;
 }
 

@@ -636,4 +636,6 @@ qboolean VK_CreateSurface( VkInstance instance, VkSurfaceKHR* pSurface );
 void    CL_UpdatePresence( void );
 void    CL_InitDiscord( void );
 void    CL_RunDiscord( void );
+void	CL_InitDiscordPresence( void );
+void	CL_ShutdownDiscord( void );
 #endif

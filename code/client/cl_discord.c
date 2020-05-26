@@ -7,6 +7,7 @@
 
 cvar_t *discordEnabled;
 cvar_t *discordAutoJoinAccept;
+DiscordRichPresence discordPresence;
 
 qboolean discordstatus = qfalse;
 
@@ -127,7 +128,12 @@ void CL_InitDiscord(){
     }
 
     CL_InitDiscordHandlers();
+    CL_InitDiscordPresence();
  }
+
+void CL_InitDiscordPresence() {
+    memset(&discordPresence, 0, sizeof(discordPresence));
+}
 
 void CL_ShutdownDiscord() {
   Com_Printf("Shutdown Discord\n");
@@ -160,30 +166,32 @@ void CL_RunDiscord(void) {
     Discord_UpdateConnection();
 #endif
     Discord_RunCallbacks();
-
+/*
     accumulated_time += cls.frametime;
     if (accumulated_time >= DISCORD_UPDATE_MSEC) {
         CL_UpdatePresence();
         accumulated_time = 0;
     }
+    */
 }
 
 
-void CL_UpdatePresence(void)
+void CL_UpdatePresence()
 {
     char buffer_state[MAX_DISCORD_BUFFER_LENGTH];
     char buffer_details[MAX_DISCORD_BUFFER_LENGTH];
     char buffer_partyId[MAX_DISCORD_BUFFER_LENGTH];
     char buffer_joinSecret[MAX_DISCORD_BUFFER_LENGTH];
 
-    DiscordRichPresence discordPresence;
+    memset(&buffer_state, 0, MAX_DISCORD_BUFFER_LENGTH);
+    memset(&buffer_details, 0, MAX_DISCORD_BUFFER_LENGTH);
+    memset(&buffer_partyId, 0, MAX_DISCORD_BUFFER_LENGTH);
+    memset(&buffer_joinSecret, 0, MAX_DISCORD_BUFFER_LENGTH);
 
     if (!discordstatus) {
       Com_Printf("Discord is disabled, use cl_discordEnabled 1 to activate it\n");
       return;
     }
-
-    memset(&discordPresence, 0, sizeof(discordPresence));
 
     if (cls.state == CA_ACTIVE) {
       char *serverInfo, *info, *mapname;
@@ -200,9 +208,9 @@ void CL_UpdatePresence(void)
       maxPlayers = atoi(info);
       currentPlayers = 0;
       for (i = 0; i < MAX_CLIENTS; i++) {
-	if (cl.gameState.stringOffsets[CS_PLAYERS + i]) {
-	  currentPlayers++;
-	}
+	    if (cl.gameState.stringOffsets[CS_PLAYERS + i]) {
+	        currentPlayers++;
+	    }
       }
 
       discordPresence.partySize = currentPlayers;
@@ -233,14 +241,22 @@ void CL_UpdatePresence(void)
 	}
       }
 
-      Com_sprintf(buffer_joinSecret, sizeof(buffer_partyId), "%s", cls.servername);
-      discordPresence.joinSecret = buffer_joinSecret;
+      if (strlen(cls.servername)) {
+          Com_sprintf(buffer_joinSecret, sizeof(buffer_partyId), "%s", cls.servername);
+          discordPresence.joinSecret = buffer_joinSecret;
+          Com_sprintf(buffer_partyId, sizeof(buffer_partyId), "party-%s", cls.servername);
+          discordPresence.partyId = buffer_partyId;
+      }
 
-      Com_sprintf(buffer_partyId, sizeof(buffer_partyId), "party-%s", cls.servername);
-      discordPresence.partyId = buffer_partyId;
+
 
     } else {
       discordPresence.state = "Menu title";
+      memset(&discordPresence.joinSecret, 0, sizeof(discordPresence.joinSecret));
+      memset(&discordPresence.partyId, 0, sizeof(discordPresence.partyId));
+      memset(&discordPresence.partySize, 0, sizeof(discordPresence.partySize));
+      memset(&discordPresence.partyMax, 0, sizeof(discordPresence.partyMax));
+      discordPresence.details = NULL;
     }
 
     if (clc.demoplaying) {
@@ -267,7 +283,7 @@ void CL_UpdatePresence(void)
 
     Discord_UpdatePresence(&discordPresence);
 
-    /*
+    /**/
     Com_Printf("\n\n----------------------------\n");
     Com_Printf("DISCORD: presence updated\n");
     Com_Printf("DISCORD: state - %s\n", discordPresence.state);
@@ -285,6 +301,6 @@ void CL_UpdatePresence(void)
     Com_Printf("DISCORD: spectateSecret - %s\n", discordPresence.spectateSecret);
     Com_Printf("DISCORD: instance - %d\n", discordPresence.instance);
     Com_Printf("----------------------------\n\n");
-    */
+    /**/
 }
 

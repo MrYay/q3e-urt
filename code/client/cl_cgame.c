@@ -1020,6 +1020,11 @@ static void CL_FirstSnapshot( void ) {
 	}
 	
 	Sys_BeginProfiling();
+
+#ifdef USE_DISCORD
+	Com_Printf("[DISCORD]: update on map load\n");
+	CL_UpdatePresence();
+#endif
 }
 
 
