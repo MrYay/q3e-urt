@@ -4,7 +4,9 @@ on:
     branches: [ testing ]
 
 jobs:
-  build:
+
+  build-client-win64-no-sdl:
+    name: Win64 client build
     runs-on: windows-latest
     
     steps:
@@ -16,12 +18,31 @@ jobs:
       id: vars
       shell: bash
       run: |
-          echo "GITHUB_SHA: ${GITHUB_SHA}"
-          echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
-          echo "::set-output name=date::$(date +'%Y-%m-%d-%H%M%S')"
+        echo "::set-output name=date::$(echo '${{ github.event.head_commit.timestamp }}' | sed 's/T/-/;s/://g' | cut -f1 -d '+')"
     - name: Create Release
       uses: ncipollo/release-action@v1
       with:
         tag: q3e-urt-win64-${{ steps.vars.outputs.date }}
+        artifacts: "${{ github.workspace }}/build/release-mingw64-x86_64/*.exe,${{ github.workspace }}/build/release-mingw64-x86_64/*.dll"
+        token: ${{ secrets.GITHUB_TOKEN }}
+  
+  build-client-win64-sdl2:
+    name: Win64 client SDL2 build
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v2
+    - name: Build
+      run: |
+        make BUILD_SERVER=0 USE_DISCORD=1
+    - name: Setting variables
+      id: vars
+      shell: bash
+      run: |
+        echo "::set-output name=date::$(echo '${{ github.event.head_commit.timestamp }}' | sed 's/T/-/;s/://g' | cut -f1 -d '+')"
+    - name: Create Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: q3e-urt-win64-${{ steps.vars.outputs.date }}-sdl2
         artifacts: "${{ github.workspace }}/build/release-mingw64-x86_64/*.exe,${{ github.workspace }}/build/release-mingw64-x86_64/*.dll"
         token: ${{ secrets.GITHUB_TOKEN }}
