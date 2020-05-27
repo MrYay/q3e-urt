@@ -75,6 +75,7 @@ typedef enum {
 	K_Y = 'y',
 	K_Z = 'z',
 
+	// following definitions must not be changed
 	K_BACKSPACE = 127,
 
 	K_COMMAND = 128,
@@ -190,6 +191,7 @@ typedef enum {
 	K_AUX14,
 	K_AUX15,
 	K_AUX16,
+	// end of compatibility list
 
 	K_SUPER,
 	K_COMPOSE,
