@@ -20,10 +20,27 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 ===========================================================================
 */
 
+#include <float.h>
+
 #include "../client/snd_local.h"
 #include "win_local.h"
 
+HRESULT(WINAPI* pDirectSoundCreate)(GUID FAR* lpGUID, LPDIRECTSOUND FAR* lplpDS, IUnknown FAR* pUnkOuter);
+#define iDirectSoundCreate(a,b,c)	pDirectSoundCreate(a,b,c)
+typedef HRESULT(WINAPI* pDirectSoundEnumerate)(LPDSENUMCALLBACK lpDSEnumCallback, LPVOID lpContext);
+
+static qboolean	dsound_init;
+static int		sample16;
+static DWORD	gSndBufSize;
+static DWORD	locksize;
+static LPDIRECTSOUND pDS;
+static LPDIRECTSOUNDBUFFER pDSBuf, pDSPBuf;
+static HINSTANCE hInstDS;
+static LPGUID g_dsguid = NULL;
+
 extern cvar_t *s_khz;
+extern cvar_t* s_dev;
+extern cvar_t* s_alttabmute;
 
 static qboolean	dsound_init;
 
@@ -633,7 +650,7 @@ static void Done_WASAPI( void )
 HRESULT (WINAPI *pDirectSoundCreate)(GUID FAR *lpGUID, LPDIRECTSOUND FAR *lplpDS, IUnknown FAR *pUnkOuter);
 #define iDirectSoundCreate(a,b,c)	pDirectSoundCreate(a,b,c)
 
-#define SECONDARY_BUFFER_SIZE	0x10000
+#define SECONDARY_BUFFER_SIZE	0x20000
 
 static int		sample16;
 static DWORD	gSndBufSize;
@@ -784,6 +801,73 @@ DEFINE_GUID(CLSID_DirectSound8, 0x3901cc3f, 0x84b5, 0x4fa4, 0xba, 0x35, 0xaa, 0x
 DEFINE_GUID(IID_IDirectSound8, 0xC50A7E93, 0xF395, 0x4834, 0x9E, 0xF6, 0x7F, 0xA9, 0x9D, 0xE5, 0x09, 0x66);
 DEFINE_GUID(IID_IDirectSound, 0x279AFA83, 0x4981, 0x11CE, 0xA5, 0x21, 0x00, 0x20, 0xAF, 0x0B, 0xE5, 0x60);
 
+BOOL CALLBACK SNDDMAHD_DSEnumCallback(LPGUID lpguid, LPCSTR lpszdesc, LPCSTR lpszmod, LPVOID lpcontext)
+{
+	Com_Printf("> ^3%s", lpszdesc);
+	if (strstr(lpszdesc, s_dev->string) != NULL)
+	{
+		Com_Printf(" ^2MATCH");
+		if (g_dsguid == NULL)
+		{
+			Com_Printf(" ^5USING");
+			g_dsguid = lpguid;
+		}
+	}
+	Com_Printf("\n");
+	return TRUE; // Continue enumerating
+}
+
+BOOL CALLBACK SNDDMAHD_DSEnumCallbackList(LPGUID lpguid, LPCSTR lpszdesc, LPCSTR lpszmod, LPVOID lpcontext)
+{
+	Com_Printf("> ^3%s\n", lpszdesc);
+	return TRUE; // Continue enumerating
+}
+
+qboolean SNDDMAHD_DSEnumSoundDevices(qboolean blistonly)
+{
+	HMODULE hdsounddll = NULL;
+	pDirectSoundEnumerate DSEnumerate;
+
+	if ((hdsounddll = LoadLibrary("dsound.dll")) != NULL &&
+		(DSEnumerate = (pDirectSoundEnumerate)GetProcAddress(hdsounddll, "DirectSoundEnumerateA")) != NULL &&
+		s_dev->string != NULL && s_dev->string[0] != '\0')
+	{
+		if (blistonly)
+		{
+			Com_Printf("^4List of DirectSound devices:\n");
+			if (FAILED(DSEnumerate(SNDDMAHD_DSEnumCallbackList, NULL)))
+			{
+				Com_Printf("^1Error Enumerating DirectSound Devices\n");
+				return qfalse;
+			}
+		}
+		else
+		{
+			Com_Printf("^4Looking for DirectSound Device '%s'\n", s_dev->string);
+
+			if (FAILED(DSEnumerate(SNDDMAHD_DSEnumCallback, NULL)))
+			{
+				Com_Printf("^1Error Enumerating DirectSound Devices\n");
+				return qfalse;
+			}
+
+			if (g_dsguid == NULL)
+				Com_Printf("^1Device '%s' not found. ^2Using default driver.\n", s_dev->string);
+		}
+	}
+	if (hdsounddll != NULL) FreeLibrary(hdsounddll);
+	hdsounddll = NULL;
+	return qtrue;
+}
+
+qboolean SNDDMAHD_DevList(void)
+{
+	return SNDDMAHD_DSEnumSoundDevices(qtrue);
+}
+
+#ifndef NO_DMAHD
+qboolean dmaHD_Enabled(void);
+#endif
 
 qboolean SNDDMA_InitDS( void )
 {
@@ -806,7 +890,7 @@ qboolean SNDDMA_InitDS( void )
 		}
 	}
 
-	hresult = pDS->lpVtbl->Initialize( pDS, NULL);
+	hresult = pDS->lpVtbl->Initialize( pDS, g_dsguid);
 
 	Com_DPrintf( "ok\n" );
 
@@ -827,10 +911,21 @@ qboolean SNDDMA_InitDS( void )
 	switch ( s_khz->integer ) {
 		case 48: dma.speed = 48000; break;
 		case 44: dma.speed = 44100; break;
+		case 32: dma.speed = 32000; break;
+		case 24: dma.speed = 24000; break;
 		case 11: dma.speed = 11025; break;
 		case 22:
 		default: dma.speed = 22050; break;
 	};
+
+#ifndef NO_DMAHD
+	if (dmaHD_Enabled())
+	{
+		dma.speed = 44100;
+		dma.channels = 2;
+		dma.samplebits = 16;
+	}
+#endif		
 
 	memset (&format, 0, sizeof(format));
 	format.wFormatTag = WAVE_FORMAT_PCM;
@@ -846,6 +941,9 @@ qboolean SNDDMA_InitDS( void )
 
 	// Micah: take advantage of 2D hardware.if available.
 	dsbuf.dwFlags = DSBCAPS_LOCHARDWARE | DSBCAPS_GLOBALFOCUS;
+	if (s_alttabmute->integer == 0) {
+		dsbuf.dwFlags |= DSBCAPS_STICKYFOCUS; // Keep playing when out of focus.
+	}
 	if (use8) {
 		dsbuf.dwFlags |= DSBCAPS_GETCURRENTPOSITION2;
 	}
@@ -864,6 +962,9 @@ qboolean SNDDMA_InitDS( void )
 		dsbuf.dwFlags = DSBCAPS_LOCSOFTWARE | DSBCAPS_GLOBALFOCUS;
 		if (use8) {
 			dsbuf.dwFlags |= DSBCAPS_GETCURRENTPOSITION2;
+		}
+		if (s_alttabmute->integer == 0) {
+			dsbuf.dwFlags |= DSBCAPS_STICKYFOCUS; // Keep playing when out of focus.
 		}
 		if (DS_OK != pDS->lpVtbl->CreateSoundBuffer(pDS, &dsbuf, &pDSBuf, NULL)) {
 			Com_Printf( "failed\n" );

@@ -32,9 +32,14 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 #include "snd_local.h"
 #include "snd_codec.h"
 #include "client.h"
+#include "snd_dmahd.h"
+
+void S_Play_f(void);
+void S_SoundList_f(void);
+void S_Music_f(void);
 
 static void S_Update_( void );
-static void S_UpdateBackgroundTrack( void );
+void S_UpdateBackgroundTrack( void );
 static void S_Base_StopAllSounds( void );
 static void S_Base_StopBackgroundTrack( void );
 
@@ -62,12 +67,12 @@ channel_t   s_channels[MAX_CHANNELS];
 channel_t   loop_channels[MAX_CHANNELS];
 int			numLoopChannels;
 
-static		qboolean	s_soundStarted;
-static		qboolean	s_soundMuted;
+qboolean	s_soundStarted = 0;
+qboolean	s_soundMuted = qfalse;
 
 dma_t		dma;
 
-static int			listener_number;
+int			listener_number = 0;
 static vec3_t		listener_origin;
 static vec3_t		listener_axis[3];
 
@@ -85,14 +90,16 @@ sfx_t		*sfxHash[LOOP_HASH];
 
 cvar_t		*s_testsound;
 cvar_t		*s_khz;
+cvar_t		*s_dev;
 cvar_t		*s_show;
 cvar_t		*s_mixahead;
 cvar_t		*s_mixPreStep;
+cvar_t		*s_alttabmute;
 #ifdef __linux__
 cvar_t		*s_device;
 #endif
 
-static loopSound_t	loopSounds[MAX_GENTITIES];
+loopSound_t	loopSounds[MAX_GENTITIES];
 static	channel_t	*freelist = NULL;
 
 int			s_rawend;
@@ -127,7 +134,6 @@ static void S_Base_SoundInfo( void ) {
 	}
 	Com_Printf("----------------------\n" );
 }
-
 
 /*
 =================
@@ -514,15 +520,15 @@ static void S_Base_StartSound( const vec3_t origin, int entityNum, int entchanne
 
 	// try to limit sound duplication
 	if ( entityNum == listener_number )
-		allowed = 16;
+		allowed = 32;
 	else
-		allowed = 8;
+		allowed = 16;
 
 	ch = s_channels;
 	inplay = 0;
 	for ( i = 0; i < MAX_CHANNELS ; i++, ch++ ) {		
 		if ( ch->entnum == entityNum && ch->thesfx == sfx ) {
-			if ( time - ch->allocTime < 20 ) {
+			if ( time - ch->allocTime < 30 ) {
 //				if (Cvar_VariableIntegerValue( "cg_showmiss" )) {
 //					Com_Printf( "double sound start: %d %s\n", entityNum, sfx->soundName);
 //				}
@@ -1138,7 +1144,7 @@ void S_Base_Update( void ) {
 }
 
 
-static void S_GetSoundtime( void )
+void S_GetSoundtime( void )
 {
 	int		samplepos;
 	static	int		buffers;
@@ -1332,7 +1338,7 @@ static void S_Base_StartBackgroundTrack( const char *intro, const char *loop ){
 S_UpdateBackgroundTrack
 ======================
 */
-static void S_UpdateBackgroundTrack( void ) {
+void S_UpdateBackgroundTrack( void ) {
 	int		bufferSamples;
 	int		fileSamples;
 	byte	raw[30000];		// just enough to fit in a mac stack frame
@@ -1357,7 +1363,7 @@ static void S_UpdateBackgroundTrack( void ) {
 		bufferSamples = MAX_RAW_SAMPLES - (s_rawend - s_soundtime);
 
 		// decide how much data needs to be read from the file
-		fileSamples = bufferSamples * s_backgroundStream->info.rate / dma.speed;
+		fileSamples = (bufferSamples * dma.speed) / s_backgroundStream->info.rate;
 
 		if (!fileSamples) {
 			return;
@@ -1465,6 +1471,7 @@ static void S_Base_Shutdown( void ) {
 	dma_buffer2 = NULL;
 
 	Cmd_RemoveCommand( "s_info" );
+	Cmd_RemoveCommand("s_devlist");
 }
 
 
@@ -1480,11 +1487,17 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		return qfalse;
 	}
 
+#ifndef NO_DMAHD
+	s_khz = Cvar_Get("s_khz", "44", CVAR_ARCHIVE);
+#else
 	s_khz = Cvar_Get( "s_khz", "22", CVAR_ARCHIVE_ND | CVAR_LATCH );
+#endif
 	s_mixahead = Cvar_Get( "s_mixahead", "0.2", CVAR_ARCHIVE_ND );
 	s_mixPreStep = Cvar_Get( "s_mixPreStep", "0.05", CVAR_ARCHIVE_ND );
 	s_show = Cvar_Get( "s_show", "0", CVAR_CHEAT );
 	s_testsound = Cvar_Get( "s_testsound", "0", CVAR_CHEAT );
+	s_dev = Cvar_Get("s_dev", "", CVAR_ARCHIVE);
+	s_alttabmute = Cvar_Get("s_alttabmute", "1", CVAR_ARCHIVE);
 #ifdef __linux__
 	s_device = Cvar_Get( "s_device", "default", CVAR_ARCHIVE_ND | CVAR_LATCH );
 	Cvar_SetDescription( s_device, "Set ALSA output device\n"
@@ -1492,7 +1505,6 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 		" Enter " S_COLOR_CYAN "aplay -L "S_COLOR_WHITE"in your shell to see all options.\n"
 		S_COLOR_YELLOW " Please note that only mono/stereo devices are acceptable.\n" );
 #endif
-
 	r = SNDDMA_Init();
 
 	if ( r ) {
@@ -1538,6 +1550,8 @@ qboolean S_Base_Init( soundInterface_t *si ) {
 	si->ClearSoundBuffer = S_Base_ClearSoundBuffer;
 	si->SoundInfo = S_Base_SoundInfo;
 	si->SoundList = S_Base_SoundList;
-
+#ifndef NO_DMAHD
+	if (dmaHD_Enabled()) return dmaHD_Init(si);
+#endif
 	return qtrue;
 }
