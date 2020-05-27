@@ -12,15 +12,16 @@ jobs:
     - name: Build
       run: |
         make BUILD_SERVER=0 USE_DISCORD=1 USE_SDL=0
-    - name: Getting Commit SHA
+    - name: Setting variables
       id: vars
       shell: bash
       run: |
           echo "GITHUB_SHA: ${GITHUB_SHA}"
           echo "::set-output name=sha_short::$(git rev-parse --short HEAD)"
+          echo "::set-output name=date::$(date +'%Y-%m-%d-%H%M%S')"
     - name: Create Release
       uses: ncipollo/release-action@v1
       with:
-        tag: q3e-urt-win64-${{ steps.vars.outputs.sha_short }}
+        tag: q3e-urt-win64-${{ steps.vars.outputs.date }}
         artifacts: "${{ github.workspace }}/build/release-mingw64-x86_64/*.exe,${{ github.workspace }}/build/release-mingw64-x86_64/*.dll"
         token: ${{ secrets.GITHUB_TOKEN }}
