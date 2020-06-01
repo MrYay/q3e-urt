@@ -298,6 +298,7 @@ static	cvar_t		*fs_homepath;
 static	cvar_t		*fs_steampath;
 
 static	cvar_t		*fs_basepath;
+static	cvar_t		*fs_downloadpath;
 static	cvar_t		*fs_basegame;
 static	cvar_t		*fs_copyfiles;
 static	cvar_t		*fs_gamedirvar;
@@ -4647,6 +4648,7 @@ static void FS_Startup( void ) {
 	fs_debug = Cvar_Get( "fs_debug", "0", 0 );
 	fs_copyfiles = Cvar_Get( "fs_copyfiles", "0", CVAR_INIT );
 	fs_basepath = Cvar_Get( "fs_basepath", Sys_DefaultBasePath(), CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
+	fs_downloadpath = Cvar_Get("fs_downloadpath", "download", CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE);
 	fs_basegame = Cvar_Get( "fs_basegame", BASEGAME, CVAR_INIT | CVAR_PROTECTED );
 	fs_steampath = Cvar_Get( "fs_steampath", Sys_SteamPath(), CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE );
 
@@ -4685,19 +4687,19 @@ static void FS_Startup( void ) {
 
 	// add search path elements in reverse priority order
 	if ( fs_steampath->string[0] ) {
-		FS_AddGameDirectory(va("%s/q3ut4", fs_steampath->string), "download");
+		FS_AddGameDirectory(va("%s/%s", fs_steampath->string, BASEGAME), fs_downloadpath->string);
 		FS_AddGameDirectory( fs_steampath->string, fs_basegame->string );
 	}
 
 	if ( fs_basepath->string[0] ) {
-		FS_AddGameDirectory(va("%s/q3ut4", fs_basepath->string), "download");
+		FS_AddGameDirectory(va("%s/%s", fs_basepath->string, BASEGAME), fs_downloadpath->string);
 		FS_AddGameDirectory( fs_basepath->string, fs_basegame->string );
 	}
 
 	// fs_homepath is somewhat particular to *nix systems, only add if relevant
 	// NOTE: same filtering below for mods and basegame
 	if ( fs_homepath->string[0] && Q_stricmp( fs_homepath->string, fs_basepath->string ) ) {
-		FS_AddGameDirectory(va("%s/q3ut4", fs_homepath->string), "download");
+		FS_AddGameDirectory(va("%s/%s", fs_homepath->string, BASEGAME), fs_downloadpath->string);
 		FS_AddGameDirectory( fs_homepath->string, fs_basegame->string );
 	}
 

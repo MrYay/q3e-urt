@@ -2455,6 +2455,7 @@ void CL_NextDownload(void)
 {
 	char* s;
 	char* remoteName, * localName;
+	cvar_t* fs_downloadpath;
 	qboolean useCURL = qfalse;
 
 	// A download has finished, check whether this matches a referenced checksum
@@ -2487,7 +2488,8 @@ void CL_NextDownload(void)
 
 		*s++ = '\0';
 		localName = s;
-		Com_sprintf(localName, MAX_STRING_CHARS, "q3ut4/download/%s", COM_SkipPath(CopyString(localName)));
+		fs_downloadpath = Cvar_Get("fs_downloadpath", "", CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE);
+		Com_sprintf(localName, MAX_STRING_CHARS, "%s/%s/%s", BASEGAME, fs_downloadpath->string, COM_SkipPath(CopyString(localName)));
 		if ( (s = strchr(s, '@')) != NULL )
 			*s++ = '\0';
 		else
@@ -4170,6 +4172,7 @@ CL_Init
 */
 void CL_Init(void) {
 	const char* s;
+	cvar_t* fs_downloadpath;
 
 	Com_Printf("----- Client Initialization -----\n");
 
@@ -4257,11 +4260,13 @@ void CL_Init(void) {
 
 	cl_demomode = Cvar_Get("cl_demomode", "0", CVAR_ROM);
 
+	fs_downloadpath = Cvar_Get("fs_downloadpath", "", CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE);
 	cl_dlDirectory = Cvar_Get( "cl_dlDirectory", "0", CVAR_ARCHIVE_ND );
 	Cvar_CheckRange( cl_dlDirectory, "0", "1", CV_INTEGER );
 	s = va( "Save downloads initiated by \\dlmap and \\download commands in:\n"
-		" 0 - current game /download directory\n"
-		" 1 - fs_basegame (%s) /download directory\n", FS_GetBaseGameDir() );
+		" 0 - current game directory, %s \n"
+		" 1 - fs_basegame (%s) directory, %s\n", 
+		fs_downloadpath->string, FS_GetBaseGameDir(), fs_downloadpath->string);
 	Cvar_SetDescription( cl_dlDirectory, s );
 
 #ifdef USE_AUTH

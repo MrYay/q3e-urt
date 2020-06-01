@@ -860,7 +860,7 @@ Start downloading file from remoteURL and save it under fs_game/localName
 qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remoteURL, qboolean headerCheck, qboolean autoDownload )
 {
 	char *s;
-
+	cvar_t* fs_downloadpath;
 	if ( Com_DL_InProgress( dl ) )
 	{
 		Com_Printf( S_COLOR_YELLOW " already downloading %s\n", dl->Name );
@@ -893,7 +893,8 @@ qboolean Com_DL_Begin( download_t *dl, const char *localName, const char *remote
 		Q_strncpyz( dl->gameDir, FS_GetCurrentGameDir(), sizeof( dl->gameDir ) );
 	}
 
-	Com_sprintf(dl->gameDir, MAX_STRING_CHARS, "%s/download", COM_SkipPath(CopyString(dl->gameDir)));
+	fs_downloadpath = Cvar_Get("fs_downloadpath", "", CVAR_INIT | CVAR_PROTECTED | CVAR_PRIVATE);
+	Com_sprintf(dl->gameDir, MAX_STRING_CHARS, "%s/%s", COM_SkipPath(CopyString(dl->gameDir)), fs_downloadpath->string);
 
 	// try to extract game path from localName
 	// dl->Name should contain only pak name without game dir and extension
