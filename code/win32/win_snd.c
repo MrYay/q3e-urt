@@ -921,7 +921,6 @@ qboolean SNDDMA_InitDS( void )
 #ifndef NO_DMAHD
 	if (dmaHD_Enabled())
 	{
-		dma.speed = 44100;
 		dma.channels = 2;
 		dma.samplebits = 16;
 	}

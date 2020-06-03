@@ -32,8 +32,9 @@ Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301  USA
 
 qboolean snd_inited = qfalse;
 
+extern cvar_t* s_khz;
+
 cvar_t *s_sdlBits;
-cvar_t *s_sdlSpeed;
 cvar_t *s_sdlChannels;
 cvar_t *s_sdlDevSamps;
 cvar_t *s_sdlMixSamps;
@@ -202,8 +203,8 @@ qboolean SNDDMA_Init( void )
 		s_sdlBits = Cvar_Get( "s_sdlBits", "16", CVAR_ARCHIVE_ND | CVAR_LATCH );
 		Cvar_CheckRange( s_sdlBits, "8", "16", CV_INTEGER );
 
-		s_sdlSpeed = Cvar_Get( "s_sdlSpeed", "0", CVAR_ARCHIVE_ND | CVAR_LATCH );
-		Cvar_CheckRange( s_sdlSpeed, "0", "48000", CV_INTEGER );
+		s_khz = Cvar_Get("s_khz", "0", CVAR_ARCHIVE_ND | CVAR_LATCH);
+		Cvar_CheckRange(s_khz, "0", "48", CV_INTEGER);
 
 		s_sdlChannels = Cvar_Get( "s_sdlChannels", "2", CVAR_ARCHIVE_ND | CVAR_LATCH );
 		Cvar_CheckRange( s_sdlChannels, "1", "2", CV_INTEGER );
@@ -255,9 +256,15 @@ qboolean SNDDMA_Init( void )
 	memset( &desired, '\0', sizeof (desired) );
 	memset( &obtained, '\0', sizeof (obtained) );
 
-	desired.freq = s_sdlSpeed->integer;
-	if ( desired.freq == 0 )
-		desired.freq = 22050;
+	switch (s_khz->integer) {
+	case 48: desired.freq = 48000; break;
+	case 44: desired.freq = 44100; break;
+	case 32: desired.freq = 32000; break;
+	case 24: desired.freq = 24000; break;
+	case 11: desired.freq = 11025; break;
+	case 22:
+	default: desired.freq = 22050; break;
+	};
 
 	tmp = s_sdlBits->integer;
 	if ( tmp < 16 )
