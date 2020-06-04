@@ -1,0 +1,54 @@
+name: testing_client_unix64
+on:
+  push:
+    branches: [ testing ]
+
+jobs:
+
+  build-client-unix64-no-sdl:
+    name: Unix64 client build
+    runs-on: ubuntu-latest
+     
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: |
+        sudo apt-get install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev
+    - name: Build
+      run: |
+        make BUILD_SERVER=0 USE_SDL=0
+    - name: Setting variables
+      id: vars
+      shell: bash
+      run: |
+        echo "::set-output name=date::$(echo '${{ github.event.head_commit.timestamp }}' | sed 's/T/-/;s/://g' | cut -f1 -d '+')"
+    - name: Create Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: q3e-urt-unix64-${{ steps.vars.outputs.date }}
+        artifacts: "${{ github.workspace }}/build/release-linux-x86_64/*.x64,${{ github.workspace }}/build/release-linux-x86_64/*.so"
+        token: ${{ secrets.GITHUB_TOKEN }}
+  
+  build-client-unix64-sdl2:
+    name: Unix64 client SDL2 build
+    runs-on: ubuntu-latest
+     
+    steps:
+    - uses: actions/checkout@v2
+    - name: Install dependencies
+      run: |
+        sudo apt-get install libcurl4-openssl-dev mesa-common-dev libxxf86dga-dev libxrandr-dev libxxf86vm-dev libasound-dev libsdl2-dev
+    - name: Build
+      run: |
+        make BUILD_SERVER=0
+    - name: Setting variables
+      id: vars
+      shell: bash
+      run: |
+        echo "::set-output name=date::$(echo '${{ github.event.head_commit.timestamp }}' | sed 's/T/-/;s/://g' | cut -f1 -d '+')"
+    - name: Create Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: q3e-urt-unix64-${{ steps.vars.outputs.date }}-sdl2
+        artifacts: "${{ github.workspace }}/build/release-linux-x86_64/*.x64,${{ github.workspace }}/build/release-linux-x86_64/*.so"
+        token: ${{ secrets.GITHUB_TOKEN }}
