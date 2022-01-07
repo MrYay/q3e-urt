@@ -72,6 +72,9 @@ endif
 ifeq ($(PLATFORM),mingw64)
   MINGW=1
 endif
+ifeq ($(PLATFORM),msys)
+  MINGW=1
+endif
 
 ifeq ($(COMPILE_ARCH),i86pc)
   COMPILE_ARCH=x86
