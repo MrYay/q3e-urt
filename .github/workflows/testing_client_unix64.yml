@@ -2,6 +2,7 @@ name: testing_client_unix64
 on:
   push:
     branches: [ testing ]
+  workflow_dispatch:
 
 jobs:
 
